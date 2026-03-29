@@ -1,5 +1,6 @@
 #include <Tactility/Tactility.h>
 
+#include <Tactility/app/AppManifest.h>
 #include <Tactility/app/AppContext.h>
 #include <Tactility/app/AppPaths.h>
 #include <Tactility/app/AppRegistration.h>
@@ -19,6 +20,7 @@ namespace tt::app::launcher {
 
 static const auto LOGGER = Logger("Launcher");
 static constexpr uint32_t LAUNCHER_ASSET_ICON_SIZE = 64;
+static constexpr int32_t APP_LABEL_GAP = 3;
 
 static uint32_t getButtonPadding(UiDensity density, uint32_t buttonSize) {
     if (density == LVGL_UI_DENSITY_COMPACT) {
@@ -28,11 +30,25 @@ static uint32_t getButtonPadding(UiDensity density, uint32_t buttonSize) {
     }
 }
 
+static std::string getLauncherButtonName(const char* appId) {
+    if (appId == nullptr) {
+        return {};
+    }
+
+    if (const auto manifest = findAppManifestById(appId); manifest != nullptr) {
+        return getDisplayName(*manifest);
+    }
+
+    return appId;
+}
+
 class LauncherApp final : public App {
 
     static lv_obj_t* createAppButton(lv_obj_t* parent, UiDensity uiDensity, const std::string& imagePath, const char* appId, int32_t itemMargin, bool isLandscape) {
         const auto button_size = lvgl_get_launcher_icon_font_height();
         const auto button_padding = getButtonPadding(uiDensity, button_size);
+        const auto total_button_size = static_cast<int32_t>(button_size + (button_padding * 2));
+        const auto button_name = getLauncherButtonName(appId);
         auto* apps_button = lv_button_create(parent);
 
         lv_obj_set_style_pad_all(apps_button, static_cast<int32_t>(button_padding), LV_STATE_DEFAULT);
@@ -48,8 +64,22 @@ class LauncherApp final : public App {
         // create the image first
         auto* button_image = lv_image_create(apps_button);
         lv_image_set_src(button_image, imagePath.c_str());
-        lv_image_set_scale(button_image, (button_size * LV_SCALE_NONE) / LAUNCHER_ASSET_ICON_SIZE);
-        lv_obj_center(button_image);
+        lv_obj_set_size(button_image, static_cast<int32_t>(button_size), static_cast<int32_t>(button_size));
+        lv_image_set_inner_align(button_image, LV_IMAGE_ALIGN_CONTAIN);
+
+        auto* button_label = lv_label_create(apps_button);
+        lv_obj_set_style_text_font(button_label, lvgl_get_text_font(FONT_SIZE_SMALL), LV_PART_MAIN);
+        lv_label_set_text(button_label, button_name.c_str());
+        lv_obj_update_layout(button_label);
+
+        const auto label_width = lv_obj_get_width(button_label);
+        const auto label_height = lv_obj_get_height(button_label);
+        const auto button_width = std::max<int32_t>(total_button_size, label_width);
+        const auto button_height = total_button_size + APP_LABEL_GAP + label_height;
+
+        lv_obj_set_size(apps_button, button_width, button_height);
+        lv_obj_align(button_image, LV_ALIGN_TOP_MID, 0, static_cast<int32_t>(button_padding));
+        lv_obj_align_to(button_label, button_image, LV_ALIGN_OUT_BOTTOM_MID, 0, APP_LABEL_GAP);
 
         lv_obj_add_event_cb(apps_button, onAppPressed, LV_EVENT_SHORT_CLICKED, (void*)appId);
 
