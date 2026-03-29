@@ -11,6 +11,7 @@
 #include <tactility/lvgl_icon_shared.h>
 
 #include <lvgl.h>
+#include <algorithm>
 #include <map>
 
 namespace tt::app::localesettings {
@@ -33,40 +34,49 @@ class LocaleSettingsApp final : public App {
     lv_obj_t* languageDropdown = nullptr;
     lv_obj_t* languageLabel = nullptr;
     bool settingsUpdated = false;
+    std::vector<settings::Language> supportedLanguages;
 
     std::map<settings::Language, std::string> languageMap;
 
+    static std::string getLanguageLabel(const tt::i18n::TextResources& textResources, settings::Language language) {
+        switch (language) {
+            case settings::Language::en_GB:
+                return textResources[i18n::Text::EN_GB];
+            case settings::Language::en_US:
+                return textResources[i18n::Text::EN_US];
+            case settings::Language::fr_FR:
+                return textResources[i18n::Text::FR_FR];
+            case settings::Language::nl_BE:
+                return textResources[i18n::Text::NL_BE];
+            case settings::Language::nl_NL:
+                return textResources[i18n::Text::NL_NL];
+            case settings::Language::zh_CN:
+                return textResources[i18n::Text::ZH_CN];
+            case settings::Language::count:
+                return "";
+        }
+        return "";
+    }
+
+    uint32_t getSelectedLanguageIndex(settings::Language language) const {
+        const auto it = std::find(supportedLanguages.begin(), supportedLanguages.end(), language);
+        if (it == supportedLanguages.end()) {
+            return 0;
+        }
+        return static_cast<uint32_t>(std::distance(supportedLanguages.begin(), it));
+    }
+
     std::string getLanguageOptions() const {
         std::vector<std::string> items;
-        for (int i = 0; i < static_cast<int>(settings::Language::count); i++) {
-            switch (static_cast<settings::Language>(i)) {
-                case settings::Language::en_GB:
-                    items.push_back(textResources[i18n::Text::EN_GB]);
-                    break;
-                case settings::Language::en_US:
-                    items.push_back(textResources[i18n::Text::EN_US]);
-                    break;
-                case settings::Language::fr_FR:
-                    items.push_back(textResources[i18n::Text::FR_FR]);
-                    break;
-                case settings::Language::nl_BE:
-                    items.push_back(textResources[i18n::Text::NL_BE]);
-                    break;
-                case settings::Language::nl_NL:
-                    items.push_back(textResources[i18n::Text::NL_NL]);
-                    break;
-                case settings::Language::zh_CN:
-                    items.push_back(textResources[i18n::Text::ZH_CN]);
-                    break;
-                case settings::Language::count:
-                    break;
-            }
+        for (const auto language: supportedLanguages) {
+            items.push_back(getLanguageLabel(textResources, language));
         }
         return string::join(items, "\n");
     }
 
     void updateViews() {
         textResources.load();
+        supportedLanguages = settings::getSupportedLanguages();
 
         if (regionLabel != nullptr) {
             lv_label_set_text(regionLabel, textResources[i18n::Text::REGION].c_str());
@@ -79,16 +89,18 @@ class LocaleSettingsApp final : public App {
         }
         std::string language_options = getLanguageOptions();
         lv_dropdown_set_options(languageDropdown, language_options.c_str());
-        lv_dropdown_set_selected(languageDropdown, static_cast<uint32_t>(settings::getLanguage()));
+        lv_dropdown_set_selected(languageDropdown, getSelectedLanguageIndex(settings::getLanguage()));
     }
 
     static void onLanguageSet(lv_event_t* event) {
         auto* dropdown = static_cast<lv_obj_t*>(lv_event_get_target(event));
         auto index = lv_dropdown_get_selected(dropdown);
-        auto language = static_cast<settings::Language>(index);
-        settings::setLanguage(language);
-
         auto* self = static_cast<LocaleSettingsApp*>(lv_event_get_user_data(event));
+        if (index >= self->supportedLanguages.size()) {
+            return;
+        }
+        auto language = self->supportedLanguages[index];
+        settings::setLanguage(language);
         self->updateViews();
     }
 
@@ -101,6 +113,7 @@ public:
 
     void onShow(AppContext& app, lv_obj_t* parent) override {
         textResources.load();
+        supportedLanguages = settings::getSupportedLanguages();
 
         lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_style_pad_row(parent, 0, LV_STATE_DEFAULT);
@@ -156,7 +169,7 @@ public:
         lv_obj_align(languageDropdown, LV_ALIGN_RIGHT_MID, 0, 0);
         std::string language_options = getLanguageOptions();
         lv_dropdown_set_options(languageDropdown, language_options.c_str());
-        lv_dropdown_set_selected(languageDropdown, static_cast<uint32_t>(settings::getLanguage()));
+        lv_dropdown_set_selected(languageDropdown, getSelectedLanguageIndex(settings::getLanguage()));
         lv_obj_add_event_cb(languageDropdown, onLanguageSet, LV_EVENT_VALUE_CHANGED, this);
 
         updateViews();

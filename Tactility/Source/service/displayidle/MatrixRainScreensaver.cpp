@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cassert>
 
+#include <tactility/lvgl_fonts.h>
+
 namespace tt::service::displayidle {
 
 static_assert(MatrixRainScreensaver::MAX_TRAIL_LENGTH > MatrixRainScreensaver::MIN_TRAIL_LENGTH,
@@ -71,7 +73,7 @@ void MatrixRainScreensaver::createRainCharLabels(RainChar& rc, int trailIndex, i
         rc.label = nullptr;
         return;
     }
-    lv_obj_set_style_text_font(rc.glowLabel, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(rc.glowLabel, lvgl_get_text_font(FONT_SIZE_DEFAULT), 0);
     lv_obj_set_style_text_color(rc.glowLabel, lv_color_hex(COLOR_GLOW), 0);
     lv_obj_set_style_opa(rc.glowLabel, LV_OPA_70, 0);
 
@@ -82,7 +84,7 @@ void MatrixRainScreensaver::createRainCharLabels(RainChar& rc, int trailIndex, i
         rc.glowLabel = nullptr;
         return;
     }
-    lv_obj_set_style_text_font(rc.label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(rc.label, lvgl_get_text_font(FONT_SIZE_DEFAULT), 0);
     lv_obj_set_style_text_color(rc.label, getTrailColor(trailIndex, trailLength), 0);
 
     char text[2] = {rc.ch, '\0'};

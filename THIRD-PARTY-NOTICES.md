@@ -46,6 +46,26 @@ Website: https://fonts.google.com/icons
 
 License: Multiple (SIL Open Font License, Apache License, Ubuntu Font License): https://developers.google.com/fonts/faq 
 
+### Noto Sans SC
+
+The runtime CJK text fallback shipped with Aegis for Simplified Chinese rendering is based on
+Noto Sans SC.
+
+The font image flashed onto the device is generated at build time as a subset:
+
+- `build-*/fatfs-data-root/fonts/NotoSansSC-Aegis-CommonSC.ttf`
+- `Buildscripts/font-subset/subset_runtime_cjk_font.py`
+- `Buildscripts/font-subset/runtime-cjk-charset-common-sc.txt`
+
+Source font in this repository:
+
+- `Libraries/lvgl/tests/src/test_files/fonts/noto/NotoSansSC-Regular.ttf`
+- `Libraries/lvgl/tests/src/test_files/fonts/noto/OFL.txt`
+
+Website: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+
+License: [SIL Open Font License 1.1](https://openfontlicense.org/)
+
 ### Timezones CSV
 
 Website: https://github.com/nayarsystems/posix_tz_db

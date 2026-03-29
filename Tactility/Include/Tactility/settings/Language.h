@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace tt::settings {
 
@@ -21,5 +22,9 @@ Language getLanguage();
 std::string toString(Language language);
 
 bool fromString(const std::string& text, Language& language);
+
+bool isLanguageSupported(Language language);
+
+std::vector<Language> getSupportedLanguages();
 
 }

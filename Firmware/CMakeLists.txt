@@ -92,21 +92,18 @@ endif ()
 # Devicetree code generation
 #
 
-add_custom_target(AlwaysRun
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${GENERATED_DIR}/devicetree.c"
-)
-add_custom_command(
-    OUTPUT "${GENERATED_DIR}/devicetree.c"
-        "${GENERATED_DIR}/devicetree.h"
+add_custom_target(Generated ALL
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${GENERATED_DIR}/devicetree.c" "${GENERATED_DIR}/devicetree.h"
     COMMAND python "${CMAKE_SOURCE_DIR}/Buildscripts/DevicetreeCompiler/compile.py"
         "${DEVICETREE_LOCATION}" "${GENERATED_DIR}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    DEPENDS AlwaysRun "${DEVICETREE_LOCATION}/devicetree.yaml" # AlwaysRun ensures it always gets built
+    BYPRODUCTS "${GENERATED_DIR}/devicetree.c" "${GENERATED_DIR}/devicetree.h"
     COMMENT "Generating devicetree source files..."
+    VERBATIM
 )
-add_custom_target(Generated DEPENDS "${GENERATED_DIR}/devicetree.c")
 set_source_files_properties("${GENERATED_DIR}/devicetree.c" PROPERTIES GENERATED TRUE)
 set_source_files_properties("${GENERATED_DIR}/devicetree.h" PROPERTIES GENERATED TRUE)
 # Update target for generated code
+add_dependencies(${COMPONENT_LIB} Generated)
 target_sources(${COMPONENT_LIB} PRIVATE "${GENERATED_DIR}/devicetree.c")
 target_include_directories(${COMPONENT_LIB} PRIVATE "${GENERATED_DIR}")

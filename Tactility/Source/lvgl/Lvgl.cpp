@@ -10,6 +10,8 @@
 #include <Tactility/service/ServiceRegistration.h>
 #include <Tactility/settings/DisplaySettings.h>
 
+#include "RuntimeTextFonts.h"
+
 #include <tactility/lvgl_module.h>
 #include <tactility/module.h>
 
@@ -48,6 +50,10 @@ void attachDevices() {
                 LOGGER.error("Start failed for {}", display->getName());
             }
         }
+    }
+
+    if (!loadRuntimeTextFonts()) {
+        LOGGER.warn("Continuing without runtime CJK fallback fonts");
     }
 
     // Start touch
@@ -130,6 +136,8 @@ void detachDevices() {
 
     service::stopService("Statusbar");
     service::stopService("Gui");
+
+    unloadRuntimeTextFonts();
 
     // Stop keyboards
 

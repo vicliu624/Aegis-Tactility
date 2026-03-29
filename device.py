@@ -128,6 +128,10 @@ def write_tactility_variables(output_file, device_properties: ConfigParser, devi
     if auto_start_app_id is not None:
         safe_auto_start_app_id = auto_start_app_id.replace("\"", "\\\"")
         output_file.write(f"CONFIG_TT_AUTO_START_APP_ID=\"{safe_auto_start_app_id}\"\n")
+    has_spiram = get_property_or_default(device_properties, "hardware", "spiRam", "false") == "true"
+    uses_tiny_ttf = get_property_or_default(device_properties, "sdkconfig", "CONFIG_LV_USE_TINY_TTF", "n") == "y"
+    if has_spiram and uses_tiny_ttf:
+        output_file.write("CONFIG_TT_RUNTIME_CJK_FONT=y\n")
 
 def write_core_variables(output_file, device_properties: ConfigParser):
     idf_target = get_property_or_exit(device_properties, "hardware", "target").lower()

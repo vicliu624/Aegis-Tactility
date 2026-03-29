@@ -74,4 +74,12 @@ menu "Tactility App"
        help
            The minimum time to show the splash screen in milliseconds.
            When set to 0, startup will continue to desktop as soon as boot operations are finished.
+    config TT_RUNTIME_CJK_FONT
+        bool "Enable runtime CJK font packaging and loading"
+        default n
+        depends on SPIRAM
+        help
+            Packages the runtime CJK fallback font into the data partition and enables
+            Simplified Chinese in the UI. This is intended for devices with PSRAM so
+            the font can be preloaded into external memory during startup.
 endmenu

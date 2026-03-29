@@ -81,7 +81,8 @@ esp_err_t initPartitionsEsp() {
 
     const esp_vfs_fat_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 4,
+        // Keep a few extra file handles available for runtime-loaded assets such as TTF fonts.
+        .max_files = 8,
         .allocation_unit_size = getSectorSize(),
         .disk_status_check_enable = false,
         .use_one_fat = true,
