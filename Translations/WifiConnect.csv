@@ -1,0 +1,9 @@
+key,en-US,zh-CN
+app_name,Wi-Fi Connect,Wi‑Fi 连接
+remember,Remember,记住
+connect,Connect,连接
+network_label,Network:,网络：
+password_label,Password:,密码：
+ssid_too_long,SSID too long,SSID 过长
+password_too_long,Password too long,密码过长
+connection_failed,Connection failed,连接失败
