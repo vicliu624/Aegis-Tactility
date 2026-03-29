@@ -4,19 +4,21 @@
 #include <Tactility/app/AppPaths.h>
 #include <Tactility/app/AppRegistration.h>
 #include <Tactility/hal/power/PowerDevice.h>
+#include <Tactility/lvgl/Lvgl.h>
 #include <Tactility/service/loader/Loader.h>
 #include <Tactility/settings/BootSettings.h>
 
 #include <cstring>
+#include <string>
 #include <lvgl.h>
 
 #include <tactility/lvgl_fonts.h>
-#include <tactility/lvgl_icon_launcher.h>
 #include <tactility/lvgl_module.h>
 
 namespace tt::app::launcher {
 
 static const auto LOGGER = Logger("Launcher");
+static constexpr uint32_t LAUNCHER_ASSET_ICON_SIZE = 64;
 
 static uint32_t getButtonPadding(UiDensity density, uint32_t buttonSize) {
     if (density == LVGL_UI_DENSITY_COMPACT) {
@@ -28,7 +30,7 @@ static uint32_t getButtonPadding(UiDensity density, uint32_t buttonSize) {
 
 class LauncherApp final : public App {
 
-    static lv_obj_t* createAppButton(lv_obj_t* parent, UiDensity uiDensity, const char* imageFile, const char* appId, int32_t itemMargin, bool isLandscape) {
+    static lv_obj_t* createAppButton(lv_obj_t* parent, UiDensity uiDensity, const std::string& imagePath, const char* appId, int32_t itemMargin, bool isLandscape) {
         const auto button_size = lvgl_get_launcher_icon_font_height();
         const auto button_padding = getButtonPadding(uiDensity, button_size);
         auto* apps_button = lv_button_create(parent);
@@ -45,14 +47,9 @@ class LauncherApp final : public App {
 
         // create the image first
         auto* button_image = lv_image_create(apps_button);
-        lv_obj_set_style_text_font(button_image, lvgl_get_launcher_icon_font(), LV_STATE_DEFAULT);
-        lv_image_set_src(button_image, imageFile);
-        lv_obj_set_style_text_color(button_image, lv_theme_get_color_primary(button_image), LV_STATE_DEFAULT);
-        lv_obj_set_style_image_recolor(button_image, lv_theme_get_color_primary(parent), LV_STATE_DEFAULT);
-        lv_obj_set_style_image_recolor_opa(button_image, LV_OPA_COVER, LV_STATE_DEFAULT);
-
-        // Ensure it's square (Material Symbols are slightly wider than tall)
-        lv_obj_set_size(button_image, button_size, button_size);
+        lv_image_set_src(button_image, imagePath.c_str());
+        lv_image_set_scale(button_image, (button_size * LV_SCALE_NONE) / LAUNCHER_ASSET_ICON_SIZE);
+        lv_obj_center(button_image);
 
         lv_obj_add_event_cb(apps_button, onAppPressed, LV_EVENT_SHORT_CLICKED, (void*)appId);
 
@@ -109,6 +106,7 @@ public:
 
     void onShow(AppContext& app, lv_obj_t* parent) override {
         auto* buttons_wrapper = lv_obj_create(parent);
+        const auto paths = app.getPaths();
 
         auto ui_density = lvgl_get_ui_density();
         const auto button_size = lvgl_get_launcher_icon_font_height();
@@ -142,9 +140,13 @@ public:
             margin = std::min<int32_t>(available_height / 16, total_button_size / 2);
         }
 
-        createAppButton(buttons_wrapper, ui_density, LVGL_ICON_LAUNCHER_APPS, "AppList", margin, is_landscape_display);
-        createAppButton(buttons_wrapper, ui_density, LVGL_ICON_LAUNCHER_FOLDER, "Files", margin, is_landscape_display);
-        createAppButton(buttons_wrapper, ui_density, LVGL_ICON_LAUNCHER_SETTINGS, "Settings", margin, is_landscape_display);
+        const auto apps_icon_path = lvgl::PATH_PREFIX + paths->getAssetsPath("Apps_icon.png");
+        const auto files_icon_path = lvgl::PATH_PREFIX + paths->getAssetsPath("Files_icon.png");
+        const auto settings_icon_path = lvgl::PATH_PREFIX + paths->getAssetsPath("settings_icon.png");
+
+        createAppButton(buttons_wrapper, ui_density, apps_icon_path, "AppList", margin, is_landscape_display);
+        createAppButton(buttons_wrapper, ui_density, files_icon_path, "Files", margin, is_landscape_display);
+        createAppButton(buttons_wrapper, ui_density, settings_icon_path, "Settings", margin, is_landscape_display);
 
         if (shouldShowPowerButton()) {
             auto* power_button = lv_button_create(parent);
