@@ -1,6 +1,8 @@
 #include <Tactility/app/AppRegistration.h>
+#include <Tactility/app/settings/TextResources.h>
 #include <Tactility/lvgl/Toolbar.h>
 #include <Tactility/service/loader/Loader.h>
+#include <Tactility/settings/Language.h>
 
 #include <tactility/check.h>
 #include <tactility/lvgl_icon_shared.h>
@@ -12,6 +14,27 @@
 
 namespace tt::app::settings {
 
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/Settings/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/Settings/i18n";
+#endif
+
+static std::string getLocalizedAppName() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+    static std::string appName;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+        appName = textResources[i18n::Text::APP_NAME];
+    }
+
+    return appName;
+}
+
 static void onAppPressed(lv_event_t* e) {
     const auto* manifest = static_cast<const AppManifest*>(lv_event_get_user_data(e));
     start(manifest->appId);
@@ -21,7 +44,8 @@ static void createWidget(const std::shared_ptr<AppManifest>& manifest, void* par
     check(parent);
     auto* list = static_cast<lv_obj_t*>(parent);
     const void* icon = !manifest->appIcon.empty() ? manifest->appIcon.c_str() : LVGL_ICON_SHARED_TOOLBAR;
-    auto* btn = lv_list_add_button(list, icon, manifest->appName.c_str());
+    const auto display_name = getDisplayName(*manifest);
+    auto* btn = lv_list_add_button(list, icon, display_name.c_str());
     lv_obj_t* image = lv_obj_get_child(btn, 0);
     lv_obj_set_style_text_font(image, lvgl_get_shared_icon_font(), LV_PART_MAIN);
     lv_obj_add_event_cb(btn, &onAppPressed, LV_EVENT_SHORT_CLICKED, (void*)manifest.get());
@@ -52,6 +76,7 @@ class SettingsApp final : public App {
 extern const AppManifest manifest = {
     .appId = "Settings",
     .appName = "Settings",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_SETTINGS,
     .appCategory = Category::System,
     .appFlags = AppManifest::Flags::Hidden,

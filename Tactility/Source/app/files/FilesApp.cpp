@@ -1,12 +1,35 @@
 #include <Tactility/app/files/View.h>
 #include <Tactility/app/files/State.h>
+#include <Tactility/app/files/TextResources.h>
 #include <Tactility/app/AppContext.h>
 
 #include <Tactility/service/loader/Loader.h>
+#include <Tactility/settings/Language.h>
 
 #include <memory>
 
 namespace tt::app::files {
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/Files/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/Files/i18n";
+#endif
+
+static std::string getLocalizedAppName() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+    static std::string appName;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+        appName = textResources[i18n::Text::APP_NAME];
+    }
+
+    return appName;
+}
 
 extern const AppManifest manifest;
 
@@ -38,6 +61,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "Files",
     .appName = "Files",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appCategory = Category::System,
     .appFlags = AppManifest::Flags::Hidden,
     .createApp = create<FilesApp>

@@ -1,6 +1,8 @@
 #include <Tactility/app/AppRegistration.h>
+#include <Tactility/app/applist/TextResources.h>
 #include <Tactility/service/loader/Loader.h>
 #include <Tactility/lvgl/Toolbar.h>
+#include <Tactility/settings/Language.h>
 
 #include <lvgl.h>
 #include <algorithm>
@@ -9,6 +11,27 @@
 #include <tactility/lvgl_icon_shared.h>
 
 namespace tt::app::applist {
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/AppList/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/AppList/i18n";
+#endif
+
+static std::string getLocalizedAppName() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+    static std::string appName;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+        appName = textResources[i18n::Text::APP_NAME];
+    }
+
+    return appName;
+}
 
 class AppListApp final : public App {
 
@@ -19,7 +42,8 @@ class AppListApp final : public App {
 
     static void createAppWidget(const std::shared_ptr<AppManifest>& manifest, lv_obj_t* list) {
         const void* icon = !manifest->appIcon.empty() ? manifest->appIcon.c_str() : LVGL_ICON_SHARED_TOOLBAR;
-        lv_obj_t* btn = lv_list_add_button(list, icon, manifest->appName.c_str());
+        const auto display_name = getDisplayName(*manifest);
+        lv_obj_t* btn = lv_list_add_button(list, icon, display_name.c_str());
         lv_obj_t* image = lv_obj_get_child(btn, 0);
         lv_obj_set_style_text_font(image, lvgl_get_shared_icon_font(), LV_PART_MAIN);
         lv_obj_add_event_cb(btn, &onAppPressed, LV_EVENT_SHORT_CLICKED, manifest.get());
@@ -55,6 +79,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "AppList",
     .appName = "Apps",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appCategory = Category::System,
     .appFlags = AppManifest::Flags::Hidden,
     .createApp = create<AppListApp>,

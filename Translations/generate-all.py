@@ -28,10 +28,31 @@ if __name__ == "__main__":
         "tt::app::launcher::i18n",
         "Data/system/app/Launcher/i18n"
     )
+    # AppList app
+    generate(
+        "AppList.csv",
+        "Tactility/Private/Tactility/app/applist/TextResources.h",
+        "tt::app::applist::i18n",
+        "Data/system/app/AppList/i18n"
+    )
+    # Files app
+    generate(
+        "Files.csv",
+        "Tactility/Private/Tactility/app/files/TextResources.h",
+        "tt::app::files::i18n",
+        "Data/system/app/Files/i18n"
+    )
     # LocaleSettings app
     generate(
         "LocaleSettings.csv",
         "Tactility/Private/Tactility/app/localesettings/TextResources.h",
         "tt::app::localesettings::i18n",
         "Data/system/app/LocaleSettings/i18n"
+    )
+    # Settings app
+    generate(
+        "Settings.csv",
+        "Tactility/Private/Tactility/app/settings/TextResources.h",
+        "tt::app::settings::i18n",
+        "Data/system/app/Settings/i18n"
     )

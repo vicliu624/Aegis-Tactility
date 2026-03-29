@@ -17,7 +17,8 @@ To add new translations or edit existing ones, please follow these steps:
 
 ## Notes
 
-- Do not commit the CSV files
+- Keep committed CSV exports in sync with the generated headers and `.i18n` files
+- Every translation CSV must include `en-US`, and `en-US` values may not be empty
 - When editing the ODS file, make sure you don't paste in formatted data (use CTRL+Shift+V instead of CTRL+V)
 - ODS export settings:
     - Field delimiter: `,`

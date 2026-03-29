@@ -52,6 +52,7 @@ public:
 };
 
 typedef std::shared_ptr<App>(*CreateApp)();
+typedef std::string(*ResolveLocalizedAppName)();
 
 struct AppManifest {
 
@@ -75,6 +76,9 @@ struct AppManifest {
     /** The user-readable name of the app. Used in UI. */
     std::string appName = {};
 
+    /** Optional resolver for a localized display name. Falls back to appName when not set or empty. */
+    ResolveLocalizedAppName resolveLocalizedAppName = nullptr;
+
     /** Optional icon. */
     std::string appIcon = {};
 
@@ -97,8 +101,21 @@ struct AppManifest {
     CreateApp createApp = nullptr;
 };
 
+inline std::string getDisplayName(const AppManifest& manifest) {
+    if (manifest.resolveLocalizedAppName != nullptr) {
+        auto localized_name = manifest.resolveLocalizedAppName();
+        if (!localized_name.empty()) {
+            return localized_name;
+        }
+    }
+
+    return manifest.appName;
+}
+
 struct {
-    bool operator()(const std::shared_ptr<AppManifest>& left, const std::shared_ptr<AppManifest>& right) const { return left->appName < right->appName; }
+    bool operator()(const std::shared_ptr<AppManifest>& left, const std::shared_ptr<AppManifest>& right) const {
+        return getDisplayName(*left) < getDisplayName(*right);
+    }
 } SortAppManifestByName;
 
 } // namespace

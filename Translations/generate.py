@@ -49,6 +49,19 @@ def close_i18n_files(files):
     for file in files:
         file.close()
 
+def validate_rows(rows):
+    header = rows[0]
+    if len(header) < 2:
+        raise ValueError("Translation CSV must contain at least one locale column.")
+    if "en-US" not in header[1:]:
+        raise ValueError("Translation CSV must include an en-US column.")
+
+    english_index = header.index("en-US")
+    for row_index, row in enumerate(rows[1:], start=2):
+        key = row[0] if len(row) > 0 else f"row_{row_index}"
+        if len(row) <= english_index or row[english_index] == "":
+            raise ValueError(f"Missing mandatory en-US translation for key '{key}' on CSV row {row_index}.")
+
 def generate_header(filepath, namespace, rows):
     file = open(filepath, "w", encoding="utf-8", newline="\n")
     file.write("#pragma once\n\n")
@@ -87,6 +100,11 @@ if __name__ == "__main__":
     rows = load_csv(csv_file)
     if len(rows) == 0:
         print("Error: CSV file is empty.")
+        sys.exit(1)
+    try:
+        validate_rows(rows)
+    except ValueError as exc:
+        print(f"Error: {exc}")
         sys.exit(1)
     generate_header(header_path, header_namespace, rows)
     i18n_files = open_i18n_files(rows[0], i18n_path)

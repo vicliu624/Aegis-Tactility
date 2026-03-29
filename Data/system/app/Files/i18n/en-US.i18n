@@ -1,0 +1,31 @@
+Files
+Install?
+Do you want to install {}?
+Yes
+No
+Back
+Next
+Copy
+Cut
+Rename
+Delete
+Are you sure?
+Do you want to delete this?\n{}
+New File
+Enter filename:
+New Folder
+Enter folder name:
+File exists
+Overwrite "{}"?
+Overwrite
+Cancel
+Failed to overwrite
+"{}" could not be overwritten.
+Move incomplete
+"{}" was copied but the original could not be removed.\nPlease delete it manually.
+Failed to move
+"{}" could not be moved.
+Failed to copy
+"{}" could not be copied.
+Rename failed
+"{}" already exists.

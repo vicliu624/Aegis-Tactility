@@ -1,4 +1,5 @@
 #include <Tactility/app/files/SupportedFiles.h>
+#include <Tactility/app/files/TextResources.h>
 #include <Tactility/app/files/View.h>
 
 #include <Tactility/LogMessages.h>
@@ -11,13 +12,16 @@
 #include <Tactility/app/inputdialog/InputDialog.h>
 #include <Tactility/app/notes/Notes.h>
 #include <Tactility/file/File.h>
+#include <Tactility/i18n/TextResources.h>
 #include <Tactility/kernel/Platform.h>
 #include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/lvgl/Toolbar.h>
+#include <Tactility/settings/Language.h>
 #include <tactility/check.h>
 
 #include <cstdio>
 #include <cstring>
+#include <format>
 #include <unistd.h>
 
 #ifdef ESP_PLATFORM
@@ -27,6 +31,34 @@
 namespace tt::app::files {
 
 static const auto LOGGER = Logger("Files");
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/Files/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/Files/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loaded_locale;
+
+    const auto current_locale = tt::settings::toString(tt::settings::getLanguage());
+    if (loaded_locale != current_locale) {
+        textResources.load();
+        loaded_locale = current_locale;
+    }
+
+    return textResources;
+}
+
+static const std::string& getText(i18n::Text key) {
+    return getTextResources()[key];
+}
+
+template <typename... Args>
+static std::string formatText(i18n::Text key, Args... args) {
+    return std::vformat(getText(key), std::make_format_args(args...));
+}
 
 // region Callbacks
 
@@ -210,10 +242,10 @@ void View::viewFile(const std::string& path, const std::string& filename) {
     if (isSupportedAppFile(filename)) {
 #ifdef ESP_PLATFORM
         // install(filename);
-        auto message = std::format("Do you want to install {}?", filename);
+        auto message = formatText(i18n::Text::INSTALL_MESSAGE, filename);
         installAppPath = processed_filepath;
-        auto choices = std::vector {"Yes", "No"};
-        installAppLaunchId = alertdialog::start("Install?", message, choices);
+        auto choices = std::vector {getText(i18n::Text::YES), getText(i18n::Text::NO)};
+        installAppLaunchId = alertdialog::start(getText(i18n::Text::INSTALL_TITLE), message, choices);
 #endif
     } else if (isSupportedImageFile(filename)) {
         imageviewer::start(processed_filepath);
@@ -368,40 +400,40 @@ void View::onRenamePressed() {
     std::string entry_name = state->getSelectedChildEntry();
     LOGGER.info("Pending rename {}", entry_name);
     state->setPendingAction(State::ActionRename);
-    inputdialog::start("Rename", "", entry_name);
+    inputdialog::start(getText(i18n::Text::RENAME), "", entry_name);
 }
 
 void View::onDeletePressed() {
     std::string file_path = state->getSelectedChildPath();
     LOGGER.info("Pending delete {}", file_path);
     state->setPendingAction(State::ActionDelete);
-    std::string message = "Do you want to delete this?\n" + file_path;
-    const std::vector<std::string> choices = {"Yes", "No"};
-    alertdialog::start("Are you sure?", message, choices);
+    std::string message = formatText(i18n::Text::DELETE_CONFIRM_MESSAGE, file_path);
+    const std::vector<std::string> choices = {getText(i18n::Text::YES), getText(i18n::Text::NO)};
+    alertdialog::start(getText(i18n::Text::DELETE_CONFIRM_TITLE), message, choices);
 }
 
 void View::onNewFilePressed() {
     LOGGER.info("Creating new file");
     state->setPendingAction(State::ActionCreateFile);
-    inputdialog::start("New File", "Enter filename:", "");
+    inputdialog::start(getText(i18n::Text::NEW_FILE_TITLE), getText(i18n::Text::NEW_FILE_PROMPT), "");
 }
 
 void View::onNewFolderPressed() {
     LOGGER.info("Creating new folder");
     state->setPendingAction(State::ActionCreateFolder);
-    inputdialog::start("New Folder", "Enter folder name:", "");
+    inputdialog::start(getText(i18n::Text::NEW_FOLDER_TITLE), getText(i18n::Text::NEW_FOLDER_PROMPT), "");
 }
 
 void View::showActions() {
     lv_obj_clean(action_list);
 
-    auto* copy_button = lv_list_add_button(action_list, LV_SYMBOL_COPY, "Copy");
+    auto* copy_button = lv_list_add_button(action_list, LV_SYMBOL_COPY, getText(i18n::Text::COPY).c_str());
     lv_obj_add_event_cb(copy_button, onCopyPressedCallback, LV_EVENT_SHORT_CLICKED, this);
-    auto* cut_button = lv_list_add_button(action_list, LV_SYMBOL_CUT, "Cut");
+    auto* cut_button = lv_list_add_button(action_list, LV_SYMBOL_CUT, getText(i18n::Text::CUT).c_str());
     lv_obj_add_event_cb(cut_button, onCutPressedCallback, LV_EVENT_SHORT_CLICKED, this);
-    auto* rename_button = lv_list_add_button(action_list, LV_SYMBOL_EDIT, "Rename");
+    auto* rename_button = lv_list_add_button(action_list, LV_SYMBOL_EDIT, getText(i18n::Text::RENAME).c_str());
     lv_obj_add_event_cb(rename_button, onRenamePressedCallback, LV_EVENT_SHORT_CLICKED, this);
-    auto* delete_button = lv_list_add_button(action_list, LV_SYMBOL_TRASH, "Delete");
+    auto* delete_button = lv_list_add_button(action_list, LV_SYMBOL_TRASH, getText(i18n::Text::DELETE).c_str());
     lv_obj_add_event_cb(delete_button, onDeletePressedCallback, LV_EVENT_SHORT_CLICKED, this);
 
     lv_obj_remove_flag(action_list, LV_OBJ_FLAG_HIDDEN);
@@ -433,7 +465,7 @@ void View::update(size_t start_index) {
         size_t count = 0;
 
         if (!is_root && current_start_index > 0) {
-            auto* back_btn = lv_list_add_btn(dir_entry_list, LV_SYMBOL_LEFT, "Back");
+            auto* back_btn = lv_list_add_btn(dir_entry_list, LV_SYMBOL_LEFT, getText(i18n::Text::BACK).c_str());
             lv_obj_add_event_cb(back_btn, [](lv_event_t* event) {
                 auto* view = static_cast<View*>(lv_event_get_user_data(event));
                 size_t new_index = (view->current_start_index >= view->MAX_BATCH) ? 
@@ -457,7 +489,7 @@ void View::update(size_t start_index) {
         if (!is_root && last_loaded_index < total_entries) {
             if (total_entries > current_start_index &&
                 (total_entries - current_start_index) > MAX_BATCH) {
-                auto* next_btn = lv_list_add_btn(dir_entry_list, LV_SYMBOL_RIGHT, "Next");
+                auto* next_btn = lv_list_add_btn(dir_entry_list, LV_SYMBOL_RIGHT, getText(i18n::Text::NEXT).c_str());
                 lv_obj_add_event_cb(next_btn, [](lv_event_t* event) {
                     auto* view = static_cast<View*>(lv_event_get_user_data(event));
                     view->update(view->last_loaded_index); }, LV_EVENT_SHORT_CLICKED, this);
@@ -575,7 +607,10 @@ void View::onResult(LaunchId launchId, Result result, std::unique_ptr<Bundle> bu
                     LOGGER.warn("Rename: destination already exists: \"{}\"", rename_to);
                     lock->unlock();
                     state->setPendingAction(State::ActionNone);
-                    alertdialog::start("Rename failed", "\"" + new_name + "\" already exists.");
+                    alertdialog::start(
+                        getText(i18n::Text::RENAME_FAILED_TITLE),
+                        formatText(i18n::Text::RENAME_FAILED_MESSAGE, new_name)
+                    );
                     break;
                 }
                 if (rename(filepath.c_str(), rename_to.c_str()) == 0) {
@@ -662,8 +697,8 @@ void View::onResult(LaunchId launchId, Result result, std::unique_ptr<Bundle> bu
                         LOGGER.error("Overwrite: failed to remove existing destination: \"{}\"", dst);
                         state->setPendingAction(State::ActionNone);
                         alertdialog::start(
-                            "Overwrite failed",
-                            "Could not remove \"" + file::getLastPathSegment(dst) + "\" before overwriting."
+                            getText(i18n::Text::OVERWRITE_FAILED_TITLE),
+                            formatText(i18n::Text::OVERWRITE_FAILED_MESSAGE, file::getLastPathSegment(dst))
                         );
                     }
                 }
@@ -718,8 +753,12 @@ void View::onPastePressed() {
     if (dst_exists) {
         state->setPendingPasteDst(dst);
         state->setPendingAction(State::ActionPaste);
-        const std::vector<std::string> choices = {"Overwrite", "Cancel"};
-        alertdialog::start("File exists", "Overwrite \"" + entry_name + "\"?", choices);
+        const std::vector<std::string> choices = {getText(i18n::Text::OVERWRITE), getText(i18n::Text::CANCEL)};
+        alertdialog::start(
+            getText(i18n::Text::FILE_EXISTS_TITLE),
+            formatText(i18n::Text::OVERWRITE_MESSAGE, entry_name),
+            choices
+        );
         return;
     }
 
@@ -760,13 +799,18 @@ void View::doPaste(const std::string& src, bool is_cut, const std::string& dst) 
         }
     } else if (src_delete_failed) {
         state->setPendingAction(State::ActionNone); // prevent re-trigger on dialog dismiss
-        alertdialog::start("Move incomplete", "\"" + filename + "\" was copied but the original could not be removed.\nPlease delete it manually.");
+        alertdialog::start(
+            getText(i18n::Text::MOVE_INCOMPLETE_TITLE),
+            formatText(i18n::Text::MOVE_INCOMPLETE_MESSAGE, filename)
+        );
     } else {
         LOGGER.error("Failed to {} \"{}\" to \"{}\"", is_cut ? "move" : "copy", src, dst);
         state->setPendingAction(State::ActionNone); // prevent re-trigger on dialog dismiss
         alertdialog::start(
-            std::string("Failed to ") + (is_cut ? "move" : "copy"),
-            "\"" + filename + "\" could not be " + (is_cut ? "moved." : "copied.")
+            is_cut ? getText(i18n::Text::FAILED_TO_MOVE_TITLE) : getText(i18n::Text::FAILED_TO_COPY_TITLE),
+            is_cut
+                ? formatText(i18n::Text::FAILED_TO_MOVE_MESSAGE, filename)
+                : formatText(i18n::Text::FAILED_TO_COPY_MESSAGE, filename)
         );
     }
 
