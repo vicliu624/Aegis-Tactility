@@ -664,8 +664,10 @@ class SystemInfoApp final : public App {
         addDevices(devices_tab);
 
         // Build info
-        auto* tactility_version = lv_label_create(about_tab);
-        lv_label_set_text_fmt(tactility_version, "Tactility v%s", TT_VERSION);
+        auto* aegis_version = lv_label_create(about_tab);
+        lv_label_set_text_fmt(aegis_version, "Aegis v%s", TT_VERSION);
+        auto* upstream_version = lv_label_create(about_tab);
+        lv_label_set_text(upstream_version, "Based on Tactility v0.7.0-dev");
 #ifdef ESP_PLATFORM
         auto* esp_idf_version = lv_label_create(about_tab);
         lv_label_set_text_fmt(esp_idf_version, "ESP-IDF v%d.%d.%d", ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR, ESP_IDF_VERSION_PATCH);

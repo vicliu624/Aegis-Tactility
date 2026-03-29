@@ -10,6 +10,7 @@ enum class Language {
     fr_FR,
     nl_BE,
     nl_NL,
+    zh_CN,
     count
 };
 

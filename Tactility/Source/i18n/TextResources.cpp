@@ -28,6 +28,8 @@ static std::string getDesiredLocale() {
             return "nl-BE";
         case settings::Language::nl_NL:
             return "nl-NL";
+        case settings::Language::zh_CN:
+            return "zh-CN";
         default:
             return getFallbackLocale();
     }

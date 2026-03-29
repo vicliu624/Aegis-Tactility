@@ -29,7 +29,9 @@ class LocaleSettingsApp final : public App {
     tt::i18n::TextResources textResources = tt::i18n::TextResources(TEXT_RESOURCE_PATH);
     RecursiveMutex mutex;
     lv_obj_t* regionTextArea = nullptr;
+    lv_obj_t* regionLabel = nullptr;
     lv_obj_t* languageDropdown = nullptr;
+    lv_obj_t* languageLabel = nullptr;
     bool settingsUpdated = false;
 
     std::map<settings::Language, std::string> languageMap;
@@ -53,6 +55,9 @@ class LocaleSettingsApp final : public App {
                 case settings::Language::nl_NL:
                     items.push_back(textResources[i18n::Text::NL_NL]);
                     break;
+                case settings::Language::zh_CN:
+                    items.push_back(textResources[i18n::Text::ZH_CN]);
+                    break;
                 case settings::Language::count:
                     break;
             }
@@ -63,6 +68,15 @@ class LocaleSettingsApp final : public App {
     void updateViews() {
         textResources.load();
 
+        if (regionLabel != nullptr) {
+            lv_label_set_text(regionLabel, textResources[i18n::Text::REGION].c_str());
+        }
+        if (regionTextArea != nullptr) {
+            lv_textarea_set_placeholder_text(regionTextArea, textResources[i18n::Text::REGION_PLACEHOLDER].c_str());
+        }
+        if (languageLabel != nullptr) {
+            lv_label_set_text(languageLabel, textResources[i18n::Text::LANGUAGE].c_str());
+        }
         std::string language_options = getLanguageOptions();
         lv_dropdown_set_options(languageDropdown, language_options.c_str());
         lv_dropdown_set_selected(languageDropdown, static_cast<uint32_t>(settings::getLanguage()));
@@ -106,16 +120,16 @@ public:
         lv_obj_set_style_pad_all(region_wrapper, 8, 0);
         lv_obj_set_style_border_width(region_wrapper, 0, 0);
 
-        auto* region_label = lv_label_create(region_wrapper);
-        lv_label_set_text(region_label, textResources[i18n::Text::REGION].c_str());
-        lv_obj_align(region_label, LV_ALIGN_LEFT_MID, 4, 0);
+        regionLabel = lv_label_create(region_wrapper);
+        lv_label_set_text(regionLabel, textResources[i18n::Text::REGION].c_str());
+        lv_obj_align(regionLabel, LV_ALIGN_LEFT_MID, 4, 0);
 
         // Region text area for user input (e.g., US, EU, JP)
         regionTextArea = lv_textarea_create(region_wrapper);
         lv_obj_set_width(regionTextArea, 120);
         lv_textarea_set_one_line(regionTextArea, true);
         lv_textarea_set_max_length(regionTextArea, 50);
-        lv_textarea_set_placeholder_text(regionTextArea, "e.g. US, EU");
+        lv_textarea_set_placeholder_text(regionTextArea, textResources[i18n::Text::REGION_PLACEHOLDER].c_str());
         
         // Load current region from settings
         settings::SystemSettings sysSettings;
@@ -133,7 +147,7 @@ public:
         lv_obj_set_style_pad_all(language_wrapper, 8, 0);
         lv_obj_set_style_border_width(language_wrapper, 0, 0);
 
-        auto* languageLabel = lv_label_create(language_wrapper);
+        languageLabel = lv_label_create(language_wrapper);
         lv_label_set_text(languageLabel, textResources[i18n::Text::LANGUAGE].c_str());
         lv_obj_align(languageLabel, LV_ALIGN_LEFT_MID, 4, 0);
 
@@ -144,6 +158,8 @@ public:
         lv_dropdown_set_options(languageDropdown, language_options.c_str());
         lv_dropdown_set_selected(languageDropdown, static_cast<uint32_t>(settings::getLanguage()));
         lv_obj_add_event_cb(languageDropdown, onLanguageSet, LV_EVENT_VALUE_CHANGED, this);
+
+        updateViews();
     }
 
     void onHide(AppContext& app) override {

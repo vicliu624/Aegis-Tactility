@@ -41,7 +41,7 @@ def open_i18n_files(row, i18n_path):
     for i in range(1, len(row)):
         filepath = f"{i18n_path}/{row[i]}.i18n"
         print(f"Opening {filepath}")
-        file = open(filepath, "w")
+        file = open(filepath, "w", encoding="utf-8", newline="\n")
         result.append(file)
     return result
 
@@ -50,7 +50,7 @@ def close_i18n_files(files):
         file.close()
 
 def generate_header(filepath, namespace, rows):
-    file = open(filepath, "w")
+    file = open(filepath, "w", encoding="utf-8", newline="\n")
     file.write("#pragma once\n\n")
     file.write("#include \"Tactility/i18n/TextResources.h\"\n\n")
     file.write("// WARNING: This file is auto-generated. Do not edit manually.\n\n")

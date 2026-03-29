@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Tactility/i18n/TextResources.h>
+#include "Tactility/i18n/TextResources.h"
 
 // WARNING: This file is auto-generated. Do not edit manually.
 
@@ -12,8 +12,10 @@ enum class Text {
     EN_US = 2,
     EN_GB = 3,
     FR_FR = 4,
-    REGION = 5,
-    LANGUAGE = 6,
+    ZH_CN = 5,
+    REGION = 6,
+    LANGUAGE = 7,
+    REGION_PLACEHOLDER = 8,
 };
 
 }

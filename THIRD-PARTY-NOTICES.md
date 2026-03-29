@@ -1,4 +1,18 @@
-# Third-Party Notices 
+# Third-Party Notices
+
+This repository contains Aegis, a derivative firmware based on Tactility.
+
+The notices below summarize important third-party and upstream components used by the project.
+This file should be updated whenever new third-party code, fonts, assets, or build dependencies
+are added to Aegis.
+
+### Tactility (upstream base)
+
+Aegis is based on the Tactility project.
+
+Website: https://github.com/TactilityProject/Tactility
+
+License: Mixed by subproject. See [LICENSE.md](LICENSE.md) for the repository-level overview.
 
 ### ESP-IDF
 

@@ -10,6 +10,7 @@ set(ColorReset "${Esc}[m")
 set(Cyan "${Esc}[36m")
 
 file(READ version.txt TACTILITY_VERSION)
+string(STRIP "${TACTILITY_VERSION}" TACTILITY_VERSION)
 add_compile_definitions(TT_VERSION="${TACTILITY_VERSION}")
 
 # tactility_add_module() macro

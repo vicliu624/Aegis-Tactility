@@ -39,6 +39,8 @@ std::string toString(Language language) {
             return "nl-BE";
         case Language::nl_NL:
             return "nl-NL";
+        case Language::zh_CN:
+            return "zh-CN";
         default:
             LOGGER.error("Missing serialization for language {}", static_cast<int>(language));
             std::unreachable();
@@ -56,6 +58,8 @@ bool fromString(const std::string& text, Language& language) {
         language = Language::nl_BE;
     } else if (text == "nl-NL") {
         language = Language::nl_NL;
+    } else if (text == "zh-CN") {
+        language = Language::zh_CN;
     } else {
         return false;
     }
