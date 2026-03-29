@@ -180,9 +180,10 @@ def write_spiram_variables(output_file, device_properties: ConfigParser):
     else:
         output_file.write("CONFIG_SPIRAM_TYPE_AUTO=y\n")
     speed = get_property_or_exit(device_properties, "hardware", "spiRamSpeed")
+    speed_numeric = speed[:-1] if speed.endswith("M") else speed
     # Speed
     output_file.write(f"CONFIG_SPIRAM_SPEED_{speed}=y\n")
-    output_file.write(f"CONFIG_SPIRAM_SPEED={speed}\n")
+    output_file.write(f"CONFIG_SPIRAM_SPEED={speed_numeric}\n")
     # Reduce IRAM usage
     output_file.write("CONFIG_SPIRAM_USE_MALLOC=y\n")
     output_file.write("CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y\n")

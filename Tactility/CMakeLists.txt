@@ -69,8 +69,8 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         endif ()
 
         GET_PROPERTY_FILE_CONTENT("${CMAKE_CURRENT_SOURCE_DIR}/../sdkconfig" sdkconfig_text)
-        GET_PROPERTY_VALUE(sdkconfig_text "CONFIG_TT_RUNTIME_CJK_FONT" tt_runtime_cjk_font_enabled)
-        GET_PROPERTY_VALUE(sdkconfig_text "CONFIG_LV_USE_TINY_TTF" lv_use_tiny_ttf_enabled)
+        GET_PROPERTY_VALUE_OR_DEFAULT(sdkconfig_text "CONFIG_TT_RUNTIME_CJK_FONT" "n" tt_runtime_cjk_font_enabled)
+        GET_PROPERTY_VALUE_OR_DEFAULT(sdkconfig_text "CONFIG_LV_USE_TINY_TTF" "n" lv_use_tiny_ttf_enabled)
 
         set(enable_runtime_cjk_font FALSE)
         if (tt_runtime_cjk_font_enabled STREQUAL "y" AND lv_use_tiny_ttf_enabled STREQUAL "y")

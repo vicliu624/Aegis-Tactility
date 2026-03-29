@@ -11,6 +11,14 @@ function(GET_PROPERTY_VALUE PROPERTIES_CONTENT_VAR KEY_NAME RESULT_VAR)
     endif ()
 endfunction()
 
+function(GET_PROPERTY_VALUE_OR_DEFAULT PROPERTIES_CONTENT_VAR KEY_NAME DEFAULT_VALUE RESULT_VAR)
+    if ("${${PROPERTIES_CONTENT_VAR}}" MATCHES "(^|\n)${KEY_NAME}[ \t]*=[ \t]*\"?([^\n\"]*)\"?")
+        set(${RESULT_VAR} "${CMAKE_MATCH_2}" PARENT_SCOPE)
+    else ()
+        set(${RESULT_VAR} "${DEFAULT_VALUE}" PARENT_SCOPE)
+    endif ()
+endfunction()
+
 function(GET_PROPERTY_FILE_CONTENT PROPERTY_FILE RESULT_VAR)
     get_filename_component(PROPERTY_FILE_ABS ${PROPERTY_FILE} ABSOLUTE)
     # Find the device identifier in the sdkconfig file
