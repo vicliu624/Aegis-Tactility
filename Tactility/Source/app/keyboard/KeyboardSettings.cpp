@@ -2,6 +2,8 @@
 
 #include <Tactility/Tactility.h>
 
+#include <Tactility/app/keyboard/TextResources.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/settings/KeyboardSettings.h>
 #include <Tactility/lvgl/Toolbar.h>
 
@@ -17,6 +19,39 @@ namespace keyboardbacklight {
 namespace tt::app::keyboardsettings {
 
 constexpr auto* TAG = "KeyboardSettings";
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/KeyboardSettings/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/KeyboardSettings/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
+
+static std::string getLocalizedAppName() {
+    return getTextResources()[i18n::Text::APP_NAME];
+}
+
+static std::string getTimeoutOptions() {
+    auto& textResources = getTextResources();
+    return textResources[i18n::Text::TIMEOUT_15_SECONDS] + "\n" +
+        textResources[i18n::Text::TIMEOUT_30_SECONDS] + "\n" +
+        textResources[i18n::Text::TIMEOUT_1_MINUTE] + "\n" +
+        textResources[i18n::Text::TIMEOUT_2_MINUTES] + "\n" +
+        textResources[i18n::Text::TIMEOUT_5_MINUTES] + "\n" +
+        textResources[i18n::Text::TIMEOUT_NEVER];
+}
 
 // Shared timeout values: 15s, 30s, 1m, 2m, 5m, Never (0)
 static constexpr uint32_t TIMEOUT_VALUES_MS[] = {15000, 30000, 60000, 120000, 300000, 0};
@@ -90,6 +125,7 @@ class KeyboardSettingsApp final : public App {
 
 public:
     void onShow(AppContext& app, lv_obj_t* parent) override {
+        auto& textResources = getTextResources();
         kbSettings = settings::keyboard::loadOrGetDefault();
         updated = false;
 
@@ -110,7 +146,7 @@ public:
         lv_obj_set_style_border_width(bl_wrapper, 0, LV_STATE_DEFAULT);
 
         auto* bl_label = lv_label_create(bl_wrapper);
-        lv_label_set_text(bl_label, "Keyboard backlight");
+        lv_label_set_text(bl_label, textResources[i18n::Text::KEYBOARD_BACKLIGHT].c_str());
         lv_obj_align(bl_label, LV_ALIGN_LEFT_MID, 0, 0);
         switchBacklight = lv_switch_create(bl_wrapper);
         if (kbSettings.backlightEnabled) lv_obj_add_state(switchBacklight, LV_STATE_CHECKED);
@@ -124,7 +160,7 @@ public:
         lv_obj_set_style_border_width(br_wrapper, 0, LV_STATE_DEFAULT);
 
         auto* br_label = lv_label_create(br_wrapper);
-        lv_label_set_text(br_label, "Brightness");
+        lv_label_set_text(br_label, textResources[i18n::Text::BRIGHTNESS].c_str());
         lv_obj_align(br_label, LV_ALIGN_LEFT_MID, 0, 0);
         sliderBrightness = lv_slider_create(br_wrapper);
         lv_obj_set_width(sliderBrightness, LV_PCT(50));
@@ -141,7 +177,7 @@ public:
         lv_obj_set_style_border_width(to_enable_wrapper, 0, LV_STATE_DEFAULT);
 
         auto* to_enable_label = lv_label_create(to_enable_wrapper);
-        lv_label_set_text(to_enable_label, "Auto backlight off");
+        lv_label_set_text(to_enable_label, textResources[i18n::Text::AUTO_BACKLIGHT_OFF].c_str());
         lv_obj_align(to_enable_label, LV_ALIGN_LEFT_MID, 0, 0);
         switchTimeoutEnable = lv_switch_create(to_enable_wrapper);
         if (kbSettings.backlightTimeoutEnabled) lv_obj_add_state(switchTimeoutEnable, LV_STATE_CHECKED);
@@ -154,12 +190,13 @@ public:
         lv_obj_set_style_border_width(timeout_select_wrapper, 0, LV_STATE_DEFAULT);
 
         auto* timeout_value_label = lv_label_create(timeout_select_wrapper);
-        lv_label_set_text(timeout_value_label, "Timeout");
+        lv_label_set_text(timeout_value_label, textResources[i18n::Text::TIMEOUT].c_str());
         lv_obj_align(timeout_value_label, LV_ALIGN_LEFT_MID, 0, 0);
 
         // Backlight timeout value (seconds)
         timeoutDropdown = lv_dropdown_create(timeout_select_wrapper);
-        lv_dropdown_set_options(timeoutDropdown, "15 seconds\n30 seconds\n1 minute\n2 minutes\n5 minutes\nNever");
+        const auto timeoutOptions = getTimeoutOptions();
+        lv_dropdown_set_options(timeoutDropdown, timeoutOptions.c_str());
         lv_obj_align(timeoutDropdown, LV_ALIGN_RIGHT_MID, 0, 0);
         lv_obj_add_event_cb(timeoutDropdown, onTimeoutChanged, LV_EVENT_VALUE_CHANGED, this);
         // Initialize dropdown selection from settings
@@ -181,6 +218,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "KeyboardSettings",
     .appName = "Keyboard",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_KEYBOARD_ALT,
     .appCategory = Category::Settings,
     .createApp = create<KeyboardSettingsApp>

@@ -7,9 +7,11 @@
 #include <Tactility/network/HttpdReq.h>
 #include <Tactility/app/wifimanage/View.h>
 #include <Tactility/app/wifimanage/WifiManagePrivate.h>
+#include <Tactility/app/wifimanage/TextResources.h>
 #include <Tactility/Logger.h>
 #include <Tactility/lvgl/Style.h>
 #include <Tactility/lvgl/Toolbar.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/service/wifi/Wifi.h>
 #include <Tactility/service/wifi/WifiSettings.h>
 #include <Tactility/Tactility.h>
@@ -17,6 +19,25 @@
 namespace tt::app::wifimanage {
 
 static const auto LOGGER = Logger("WifiManageView");
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/WifiManage/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/WifiManage/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
 
 std::shared_ptr<WifiManage> optWifiManage();
 
@@ -110,7 +131,8 @@ void View::createSsidListItem(const service::wifi::ApRecord& record, bool isConn
         auto* button = lv_list_add_button(networks_list, LV_SYMBOL_WIFI, record.ssid.c_str());
         lv_obj_add_event_cb(button, showDetails, LV_EVENT_SHORT_CLICKED, this);
     } else {
-        const std::string auth_info = (record.auth_mode == WIFI_AUTH_OPEN) ? "(open) " : " ";
+        const std::string auth_info =
+            (record.auth_mode == WIFI_AUTH_OPEN) ? getTextResources()[i18n::Text::OPEN_AUTH_INFO] : " ";
         const auto percentage = mapRssiToPercentage(record.rssi);
         const auto label = std::format("{} {}{}%", record.ssid, auth_info, percentage);
         auto* button = lv_list_add_button(networks_list, nullptr, label.c_str());
@@ -155,7 +177,7 @@ void View::updateNetworkList() {
     lv_obj_set_style_border_width(enable_on_boot_wrapper, 0, LV_STATE_DEFAULT);
 
     auto* enable_label = lv_label_create(enable_on_boot_wrapper);
-    lv_label_set_text(enable_label, "Enable on boot");
+    lv_label_set_text(enable_label, getTextResources()[i18n::Text::ENABLE_ON_BOOT].c_str());
     lv_obj_align(enable_label, LV_ALIGN_LEFT_MID, 0, 0);
 
     enable_on_boot_switch = lv_switch_create(enable_on_boot_wrapper);
@@ -190,7 +212,7 @@ void View::updateNetworkList() {
                 for (int i = 0; i < ap_records.size(); ++i) {
                     auto& record = ap_records[i];
                     if (record.ssid == connection_target) {
-                        lv_list_add_text(networks_list, "Connected");
+                        lv_list_add_text(networks_list, getTextResources()[i18n::Text::CONNECTED_SECTION].c_str());
                         createSsidListItem(record, false, i);
                         added_connected = true;
                         break;
@@ -198,7 +220,7 @@ void View::updateNetworkList() {
                 }
             }
 
-            lv_list_add_text(networks_list, "Other networks");
+            lv_list_add_text(networks_list, getTextResources()[i18n::Text::OTHER_NETWORKS_SECTION].c_str());
             std::set<std::string> used_ssids;
             if (!ap_records.empty()) {
                 for (int i = 0; i < ap_records.size(); ++i) {
@@ -222,14 +244,14 @@ void View::updateNetworkList() {
             } else {
                 lv_obj_clear_flag(networks_list, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_t* label = lv_label_create(networks_list);
-                lv_label_set_text(label, "No networks found.");
+                lv_label_set_text(label, getTextResources()[i18n::Text::NO_NETWORKS_FOUND].c_str());
             }
 
             connect_to_hidden = lv_button_create(networks_list);
             lv_obj_set_width(connect_to_hidden, LV_PCT(100));
             lv_obj_set_style_margin_ver(connect_to_hidden, 4, LV_STATE_DEFAULT);
             auto* connect_to_hidden_label = lv_label_create(connect_to_hidden);
-            lv_label_set_text(connect_to_hidden_label, "Connect to hidden SSID");
+            lv_label_set_text(connect_to_hidden_label, getTextResources()[i18n::Text::CONNECT_TO_HIDDEN_SSID].c_str());
             lv_obj_add_event_cb(connect_to_hidden, onConnectToHiddenClicked, LV_EVENT_SHORT_CLICKED, bindings);
             break;
         }

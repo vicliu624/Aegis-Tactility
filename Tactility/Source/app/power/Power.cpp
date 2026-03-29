@@ -1,7 +1,9 @@
 #include <Tactility/app/AppContext.h>
+#include <Tactility/app/power/TextResources.h>
 #include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/lvgl/Style.h>
 #include <Tactility/lvgl/Toolbar.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/service/loader/Loader.h>
 
 #include <Tactility/hal/power/PowerDevice.h>
@@ -11,10 +13,39 @@
 #include <tactility/lvgl_icon_shared.h>
 
 #include <lvgl.h>
+#include <format>
 
 namespace tt::app::power {
 
 #define TAG "power"
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/Power/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/Power/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
+
+template <typename... Args>
+static std::string formatText(i18n::Text key, Args&&... args) {
+    return std::vformat(getTextResources()[key], std::make_format_args(args...));
+}
+
+static std::string getLocalizedAppName() {
+    return getTextResources()[i18n::Text::APP_NAME];
+}
 
 extern const AppManifest manifest;
 
@@ -69,12 +100,12 @@ class PowerApp : public App {
     }
 
     void updateUi() {
-        const char* charge_state;
+        std::string chargeState;
         hal::power::PowerDevice::MetricData metric_data;
         if (power->getMetric(hal::power::PowerDevice::MetricType::IsCharging, metric_data)) {
-            charge_state = metric_data.valueAsBool ? "yes" : "no";
+            chargeState = metric_data.valueAsBool ? getTextResources()[i18n::Text::YES] : getTextResources()[i18n::Text::NO];
         } else {
-            charge_state = "N/A";
+            chargeState = getTextResources()[i18n::Text::NOT_AVAILABLE];
         }
 
         uint8_t charge_level;
@@ -112,24 +143,24 @@ class PowerApp : public App {
             lv_obj_add_flag(enableLabel, LV_OBJ_FLAG_HIDDEN);
         }
 
-        lv_label_set_text_fmt(chargeStateLabel, "Charging: %s", charge_state);
+        lv_label_set_text(chargeStateLabel, formatText(i18n::Text::CHARGING_FMT, chargeState).c_str());
 
         if (battery_voltage_set) {
-            lv_label_set_text_fmt(batteryVoltageLabel, "Battery voltage: %lu mV", battery_voltage);
+            lv_label_set_text(batteryVoltageLabel, formatText(i18n::Text::BATTERY_VOLTAGE_FMT, battery_voltage).c_str());
         } else {
-            lv_label_set_text_fmt(batteryVoltageLabel, "Battery voltage: N/A");
+            lv_label_set_text(batteryVoltageLabel, getTextResources()[i18n::Text::BATTERY_VOLTAGE_NA].c_str());
         }
 
         if (charge_level_scaled_set) {
-            lv_label_set_text_fmt(chargeLevelLabel, "Charge level: %d%%", charge_level);
+            lv_label_set_text(chargeLevelLabel, formatText(i18n::Text::CHARGE_LEVEL_FMT, static_cast<unsigned>(charge_level)).c_str());
         } else {
-            lv_label_set_text_fmt(chargeLevelLabel, "Charge level: N/A");
+            lv_label_set_text(chargeLevelLabel, getTextResources()[i18n::Text::CHARGE_LEVEL_NA].c_str());
         }
 
         if (current_set) {
-            lv_label_set_text_fmt(currentLabel, "Current: %ld mAh", current);
+            lv_label_set_text(currentLabel, formatText(i18n::Text::CURRENT_FMT, current).c_str());
         } else {
-            lv_label_set_text_fmt(currentLabel, "Current: N/A");
+            lv_label_set_text(currentLabel, getTextResources()[i18n::Text::CURRENT_NA].c_str());
         }
 
         lvgl::unlock();
@@ -166,7 +197,7 @@ public:
         lvgl::obj_set_style_bg_invisible(switch_container);
 
         enableLabel = lv_label_create(switch_container);
-        lv_label_set_text(enableLabel, "Charging enabled");
+        lv_label_set_text(enableLabel, getTextResources()[i18n::Text::CHARGING_ENABLED].c_str());
         lv_obj_set_align(enableLabel, LV_ALIGN_LEFT_MID);
 
         lv_obj_t* enable_switch = lv_switch_create(switch_container);
@@ -192,6 +223,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "Power",
     .appName = "Power",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_ELECTRIC_BOLT,
     .appCategory = Category::Settings,
     .createApp = create<PowerApp>

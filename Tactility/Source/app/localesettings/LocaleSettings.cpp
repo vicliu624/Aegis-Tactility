@@ -2,6 +2,7 @@
 
 #include <Tactility/RecursiveMutex.h>
 #include <Tactility/StringUtils.h>
+#include <Tactility/app/LocalizedAppName.h>
 #include <Tactility/app/localesettings/TextResources.h>
 #include <Tactility/lvgl/Toolbar.h>
 #include <Tactility/service/loader/Loader.h>
@@ -23,6 +24,10 @@ constexpr auto* TEXT_RESOURCE_PATH = "/system/app/LocaleSettings/i18n";
 #else
 constexpr auto* TEXT_RESOURCE_PATH = "system/app/LocaleSettings/i18n";
 #endif
+
+static std::string getLocalizedAppName() {
+    return tt::app::getLocalizedAppNameFromPath(TEXT_RESOURCE_PATH);
+}
 
 extern const AppManifest manifest;
 
@@ -189,6 +194,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "LocaleSettings",
     .appName = "Region & Language",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_LANGUAGE,
     .appCategory = Category::Settings,
     .createApp = create<LocaleSettingsApp>

@@ -2,6 +2,7 @@
 #include <Tactility/app/wifimanage/View.h>
 
 #include <Tactility/app/AppContext.h>
+#include <Tactility/app/LocalizedAppName.h>
 #include <Tactility/app/wifiapsettings/WifiApSettings.h>
 #include <Tactility/app/wificonnect/WifiConnect.h>
 #include <Tactility/Logger.h>
@@ -14,6 +15,16 @@
 namespace tt::app::wifimanage {
 
 static const auto LOGGER = Logger("WifiManage");
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/WifiManage/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/WifiManage/i18n";
+#endif
+
+static std::string getLocalizedAppName() {
+    return tt::app::getLocalizedAppNameFromPath(TEXT_RESOURCE_PATH);
+}
 
 extern const AppManifest manifest;
 
@@ -144,6 +155,7 @@ void WifiManage::onHide(AppContext& app) {
 extern const AppManifest manifest = {
     .appId = "WifiManage",
     .appName = "Wi-Fi",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_WIFI,
     .appCategory = Category::Settings,
     .createApp = create<WifiManage>

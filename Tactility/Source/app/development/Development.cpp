@@ -3,11 +3,13 @@
 #include <Tactility/Timer.h>
 #include <Tactility/Tactility.h>
 #include <Tactility/app/AppManifest.h>
+#include <Tactility/app/development/TextResources.h>
 #include <Tactility/lvgl/Lvgl.h>
 #include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/lvgl/Style.h>
 #include <Tactility/lvgl/Toolbar.h>
 #include <Tactility/Logger.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/service/development/DevelopmentService.h>
 #include <Tactility/service/development/DevelopmentSettings.h>
 #include <Tactility/service/loader/Loader.h>
@@ -16,11 +18,36 @@
 #include <tactility/lvgl_icon_shared.h>
 
 #include <cstring>
+#include <format>
 #include <lvgl.h>
 
 namespace tt::app::development {
 
 static const auto LOGGER = Logger("Development");
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/Development/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/Development/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
+
+static std::string getLocalizedAppName() {
+    return getTextResources()[i18n::Text::APP_NAME];
+}
+
 extern const AppManifest manifest;
 
 class DevelopmentApp final : public App {
@@ -67,16 +94,20 @@ class DevelopmentApp final : public App {
     }
 
     void updateViewState() {
+        auto& textResources = getTextResources();
         if (!service->isEnabled()) {
-            lv_label_set_text(statusLabel, "Service disabled");
+            lv_label_set_text(statusLabel, textResources[i18n::Text::SERVICE_DISABLED].c_str());
         } else if (service::wifi::getRadioState() != service::wifi::RadioState::ConnectionActive) {
-            lv_label_set_text(statusLabel, "Waiting for connection...");
+            lv_label_set_text(statusLabel, textResources[i18n::Text::WAITING_FOR_CONNECTION].c_str());
         } else { // enabled and connected to wifi
             auto ip = service::wifi::getIp();
             if (ip.empty()) {
-                lv_label_set_text(statusLabel, "Waiting for IP...");
+                lv_label_set_text(statusLabel, textResources[i18n::Text::WAITING_FOR_IP].c_str());
             } else {
-                const std::string status = std::format("Available at {}", ip);
+                const std::string status = std::vformat(
+                    textResources[i18n::Text::AVAILABLE_AT],
+                    std::make_format_args(ip)
+                );
                 lv_label_set_text(statusLabel, status.c_str());
             }
         }
@@ -125,7 +156,7 @@ public:
         lv_obj_set_style_pad_all(enable_wrapper, 0, LV_STATE_DEFAULT);
 
         lv_obj_t* enable_label = lv_label_create(enable_wrapper);
-        lv_label_set_text(enable_label, "Enable on boot");
+        lv_label_set_text(enable_label, getTextResources()[i18n::Text::ENABLE_ON_BOOT].c_str());
         lv_obj_align(enable_label, LV_ALIGN_LEFT_MID, 0, 0);
 
         enableOnBootSwitch = lv_switch_create(enable_wrapper);
@@ -144,7 +175,7 @@ public:
         // Warning
 
         auto warning_label = lv_label_create(content_wrapper);
-        lv_label_set_text(warning_label, "This feature is experimental and uses an unsecured http connection.");
+        lv_label_set_text(warning_label, getTextResources()[i18n::Text::EXPERIMENTAL_WARNING].c_str());
         lv_obj_set_width(warning_label, LV_PCT(100));
         lv_label_set_long_mode(warning_label, LV_LABEL_LONG_WRAP);
         if (lv_display_get_color_format(lv_obj_get_display(parent)) != LV_COLOR_FORMAT_L8) {
@@ -167,6 +198,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "Development",
     .appName = "Development",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_DEVICES,
     .appCategory = Category::Settings,
     .createApp = create<DevelopmentApp>

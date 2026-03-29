@@ -38,6 +38,7 @@ def print_help():
 
 def open_i18n_files(row, i18n_path):
     result = []
+    Path(i18n_path).mkdir(parents=True, exist_ok=True)
     for i in range(1, len(row)):
         filepath = f"{i18n_path}/{row[i]}.i18n"
         print(f"Opening {filepath}")
@@ -63,6 +64,7 @@ def validate_rows(rows):
             raise ValueError(f"Missing mandatory en-US translation for key '{key}' on CSV row {row_index}.")
 
 def generate_header(filepath, namespace, rows):
+    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
     file = open(filepath, "w", encoding="utf-8", newline="\n")
     file.write("#pragma once\n\n")
     file.write("#include \"Tactility/i18n/TextResources.h\"\n\n")

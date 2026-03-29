@@ -1,11 +1,13 @@
-#include <Tactility/Tactility.h>
+﻿#include <Tactility/Tactility.h>
 
 #include <Tactility/Timer.h>
 #include <Tactility/app/AppManifest.h>
 #include <Tactility/app/alertdialog/AlertDialog.h>
+#include <Tactility/app/gpssettings/TextResources.h>
 #include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/lvgl/Toolbar.h>
 #include <Tactility/Logger.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/service/gps/GpsService.h>
 #include <Tactility/service/gps/GpsState.h>
 #include <Tactility/service/loader/Loader.h>
@@ -21,6 +23,34 @@ extern AppManifest manifest;
 }
 
 namespace tt::app::gpssettings {
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/GpsSettings/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/GpsSettings/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
+
+template <typename... Args>
+static std::string formatText(i18n::Text key, Args&&... args) {
+    return std::vformat(getTextResources()[key], std::make_format_args(args...));
+}
+
+static std::string getLocalizedAppName() {
+    return getTextResources()[i18n::Text::APP_NAME];
+}
 
 extern const AppManifest manifest;
 
@@ -83,9 +113,10 @@ class GpsSettingsApp final : public App {
     void createInfoView(hal::gps::GpsModel model) {
         auto* label = lv_label_create(infoContainerWidget);
         if (model == hal::gps::GpsModel::Unknown) {
-            lv_label_set_text(label, "Model: auto-detect");
+            lv_label_set_text(label, getTextResources()[i18n::Text::MODEL_AUTO_DETECT].c_str());
         } else {
-            lv_label_set_text_fmt(label, "Model: %s", toString(model));
+            const auto modelText = formatText(i18n::Text::MODEL_FMT, toString(model));
+            lv_label_set_text(label, modelText.c_str());
         }
     }
 
@@ -106,7 +137,10 @@ class GpsSettingsApp final : public App {
                 if (gps_service->removeGpsConfiguration(configurations[index])) {
                     app->updateViews();
                 } else {
-                    alertdialog::start("Error", "Failed to remove configuration");
+                    alertdialog::start(
+                        getTextResources()[i18n::Text::ERROR_TITLE],
+                        getTextResources()[i18n::Text::REMOVE_CONFIGURATION_FAILED]
+                    );
                 }
             }
         }
@@ -129,16 +163,19 @@ class GpsSettingsApp final : public App {
         lv_obj_set_flex_flow(left_wrapper, LV_FLEX_FLOW_COLUMN);
 
         auto* uart_label = lv_label_create(left_wrapper);
-        lv_label_set_text_fmt(uart_label, "UART: %s", configuration.uartName);
+        const auto uartText = formatText(i18n::Text::UART_FMT, configuration.uartName);
+        lv_label_set_text(uart_label, uartText.c_str());
 
         auto* baud_label = lv_label_create(left_wrapper);
-        lv_label_set_text_fmt(baud_label, "Baud: %lu", configuration.baudRate);
+        const auto baudText = formatText(i18n::Text::BAUD_FMT, configuration.baudRate);
+        lv_label_set_text(baud_label, baudText.c_str());
 
         auto* model_label = lv_label_create(left_wrapper);
         if (configuration.model == hal::gps::GpsModel::Unknown) {
-            lv_label_set_text(model_label, "Model: auto-detect");
+            lv_label_set_text(model_label, getTextResources()[i18n::Text::MODEL_AUTO_DETECT].c_str());
         } else {
-            lv_label_set_text_fmt(model_label, "Model: %s", toString(configuration.model));
+            const auto modelText = formatText(i18n::Text::MODEL_FMT, toString(configuration.model));
+            lv_label_set_text(model_label, modelText.c_str());
         }
 
         // Right wrapper
@@ -213,7 +250,7 @@ class GpsSettingsApp final : public App {
                 minmea_sentence_rmc rmc;
                 char buffer[64];
                 if (service->getCoordinates(rmc)) {
-                    lv_label_set_text(statusLabelWidget, "Lock acquired");
+                    lv_label_set_text(statusLabelWidget, getTextResources()[i18n::Text::LOCK_ACQUIRED].c_str());
                     lv_obj_set_style_text_color(statusLabelWidget, lv_color_hex(0x00ff00), 0);
 
                     minmea_float latitude = { rmc.latitude.value, rmc.latitude.scale };
@@ -238,8 +275,8 @@ class GpsSettingsApp final : public App {
                     float speedKnots = minmea_tofloat(&rmc.speed);
                     if (!isnan(speedKnots)) {
                         float speedKmh = speedKnots * 1.852f;
-                        snprintf(buffer, sizeof(buffer), "%.1f km/h", speedKmh);
-                        lv_label_set_text(statusSpeedValue, buffer);
+                        const auto speedText = formatText(i18n::Text::SPEED_FMT, speedKmh);
+                        lv_label_set_text(statusSpeedValue, speedText.c_str());
                     } else {
                         lv_label_set_text(statusSpeedValue, "--");
                     }
@@ -252,14 +289,14 @@ class GpsSettingsApp final : public App {
                         const char* dirs[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
                         // Calculate cardinal direction index (0-7)
                         int idx = (int)((heading + 22.5f) / 45.0f) % 8;
-                        snprintf(buffer, sizeof(buffer), "%.0f° %s", heading, dirs[idx]);
-                        lv_label_set_text(statusHeadingValue, buffer);
+                        const auto headingText = formatText(i18n::Text::HEADING_FMT, heading, dirs[idx]);
+                        lv_label_set_text(statusHeadingValue, headingText.c_str());
                     } else {
                         lv_label_set_text(statusHeadingValue, "--");
                     }
 
                 } else {
-                    lv_label_set_text(statusLabelWidget, "Acquiring lock...");
+                    lv_label_set_text(statusLabelWidget, getTextResources()[i18n::Text::ACQUIRING_LOCK].c_str());
                     lv_obj_set_style_text_color(statusLabelWidget, lv_color_hex(0xffaa00), 0);
                     lv_label_set_text(statusLatitudeValue, "--");
                     lv_label_set_text(statusLongitudeValue, "--");
@@ -271,8 +308,8 @@ class GpsSettingsApp final : public App {
                 if (service->getGga(gga)) {
                     float altitude = minmea_tofloat(&gga.altitude);
                     if (!isnan(altitude)) {
-                        snprintf(buffer, sizeof(buffer), "%.1f m", altitude);
-                        lv_label_set_text(statusAltitudeValue, buffer);
+                        const auto altitudeText = formatText(i18n::Text::ALTITUDE_FMT, altitude);
+                        lv_label_set_text(statusAltitudeValue, altitudeText.c_str());
                     } else {
                         lv_label_set_text(statusAltitudeValue, "--");
                     }
@@ -343,7 +380,7 @@ class GpsSettingsApp final : public App {
         }
     }
 
-    lv_obj_t* createInfoRow(lv_obj_t* parent, const char* labelText, lv_color_t color) {
+    lv_obj_t* createInfoRow(lv_obj_t* parent, const std::string& labelText, lv_color_t color) {
         lv_obj_t* row = lv_obj_create(parent);
         lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
@@ -355,7 +392,7 @@ class GpsSettingsApp final : public App {
         lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
 
         lv_obj_t* label = lv_label_create(row);
-        lv_label_set_text(label, labelText);
+        lv_label_set_text(label, labelText.c_str());
         lv_obj_set_style_text_color(label, lv_palette_lighten(LV_PALETTE_GREY, 5), 0);
 
         lv_obj_t* value = lv_label_create(row);
@@ -412,12 +449,12 @@ public:
         lv_obj_set_style_pad_hor(infoContainerWidget, 10, 0);
         hasSetInfo = false;
 
-        statusLatitudeValue = createInfoRow(infoContainerWidget, "Latitude", lv_color_hex(0x00ff00));
-        statusLongitudeValue = createInfoRow(infoContainerWidget, "Longitude", lv_color_hex(0x00ff00));
-        statusAltitudeValue = createInfoRow(infoContainerWidget, "Altitude", lv_color_hex(0x00ffff));
-        statusSpeedValue = createInfoRow(infoContainerWidget, "Speed", lv_color_hex(0xffff00));
-        statusHeadingValue = createInfoRow(infoContainerWidget, "Heading", lv_color_hex(0xff88ff));
-        statusSatellitesValue = createInfoRow(infoContainerWidget, "Satellites", lv_color_hex(0xffffff));
+        statusLatitudeValue = createInfoRow(infoContainerWidget, getTextResources()[i18n::Text::LATITUDE], lv_color_hex(0x00ff00));
+        statusLongitudeValue = createInfoRow(infoContainerWidget, getTextResources()[i18n::Text::LONGITUDE], lv_color_hex(0x00ff00));
+        statusAltitudeValue = createInfoRow(infoContainerWidget, getTextResources()[i18n::Text::ALTITUDE], lv_color_hex(0x00ffff));
+        statusSpeedValue = createInfoRow(infoContainerWidget, getTextResources()[i18n::Text::SPEED], lv_color_hex(0xffff00));
+        statusHeadingValue = createInfoRow(infoContainerWidget, getTextResources()[i18n::Text::HEADING], lv_color_hex(0xff88ff));
+        statusSatellitesValue = createInfoRow(infoContainerWidget, getTextResources()[i18n::Text::SATELLITES], lv_color_hex(0xffffff));
 
         serviceStateSubscription = service->getStatePubsub()->subscribe([this](auto) {
             onServiceStateChanged();
@@ -438,7 +475,7 @@ public:
 
         auto* add_gps_button = lv_button_create(addGpsWrapper);
         auto* add_gps_label = lv_label_create(add_gps_button);
-        lv_label_set_text(add_gps_label, "Add GPS");
+        lv_label_set_text(add_gps_label, getTextResources()[i18n::Text::ADD_GPS].c_str());
         lv_obj_add_event_cb(add_gps_button, onAddGpsCallback, LV_EVENT_SHORT_CLICKED, this);
         lv_obj_align(add_gps_button, LV_ALIGN_TOP_MID, 0, 0);
 
@@ -455,6 +492,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "GpsSettings",
     .appName = "GPS",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_NAVIGATION,
     .appCategory = Category::Settings,
     .createApp = create<GpsSettingsApp>
@@ -465,3 +503,4 @@ void start() {
 }
 
 } // namespace
+

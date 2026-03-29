@@ -6,6 +6,8 @@
 #include <tactility/lvgl_module.h>
 
 #include <Tactility/Tactility.h>
+#include <Tactility/app/trackball/TextResources.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/settings/TrackballSettings.h>
 #include <Tactility/lvgl/Toolbar.h>
 
@@ -21,6 +23,35 @@ namespace trackball {
 namespace tt::app::trackballsettings {
 
 constexpr auto* TAG = "TrackballSettings";
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/TrackballSettings/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/TrackballSettings/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
+
+static std::string getLocalizedAppName() {
+    return getTextResources()[i18n::Text::APP_NAME];
+}
+
+static std::string getModeOptions() {
+    auto& textResources = getTextResources();
+    return textResources[i18n::Text::ENCODER] + "\n" +
+        textResources[i18n::Text::POINTER];
+}
 
 static trackball::Mode toDriverMode(settings::trackball::TrackballMode mode) {
     switch (mode) {
@@ -108,6 +139,7 @@ class TrackballSettingsApp final : public App {
 
 public:
     void onShow(AppContext& app, lv_obj_t* parent) override {
+        auto& textResources = getTextResources();
         tbSettings = settings::trackball::loadOrGetDefault();
         auto ui_density = lvgl_get_ui_density();
         updated = false;
@@ -133,11 +165,12 @@ public:
         lv_obj_set_style_border_width(tb_mode_wrapper, 0, LV_STATE_DEFAULT);
 
         auto* tb_mode_label = lv_label_create(tb_mode_wrapper);
-        lv_label_set_text(tb_mode_label, "Mode");
+        lv_label_set_text(tb_mode_label, textResources[i18n::Text::MODE].c_str());
         lv_obj_align(tb_mode_label, LV_ALIGN_LEFT_MID, 0, 0);
 
         trackballModeDropdown = lv_dropdown_create(tb_mode_wrapper);
-        lv_dropdown_set_options(trackballModeDropdown, "Encoder\nPointer");
+        const auto modeOptions = getModeOptions();
+        lv_dropdown_set_options(trackballModeDropdown, modeOptions.c_str());
         lv_obj_align(trackballModeDropdown, LV_ALIGN_RIGHT_MID, 0, 0);
         lv_dropdown_set_selected(trackballModeDropdown, modeToDropdownIndex(tbSettings.trackballMode));
         lv_obj_add_event_cb(trackballModeDropdown, onTrackballModeChanged, LV_EVENT_VALUE_CHANGED, this);
@@ -157,7 +190,7 @@ public:
         }
 
         auto* enc_sens_label = lv_label_create(enc_sens_wrapper);
-        lv_label_set_text(enc_sens_label, "Encoder Speed");
+        lv_label_set_text(enc_sens_label, textResources[i18n::Text::ENCODER_SPEED].c_str());
         lv_obj_align(enc_sens_label, LV_ALIGN_LEFT_MID, 0, 0);
 
         encoderSensitivitySlider = lv_slider_create(enc_sens_wrapper);
@@ -181,7 +214,7 @@ public:
         }
 
         auto* ptr_sens_label = lv_label_create(ptr_sens_wrapper);
-        lv_label_set_text(ptr_sens_label, "Pointer Speed");
+        lv_label_set_text(ptr_sens_label, textResources[i18n::Text::POINTER_SPEED].c_str());
         lv_obj_align(ptr_sens_label, LV_ALIGN_LEFT_MID, 0, 0);
 
         pointerSensitivitySlider = lv_slider_create(ptr_sens_wrapper);
@@ -208,6 +241,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "TrackballSettings",
     .appName = "Trackball",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_CIRCLE,
     .appCategory = Category::Settings,
     .createApp = create<TrackballSettingsApp>

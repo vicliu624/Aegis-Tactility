@@ -1,0 +1,19 @@
+GPS
+Model: auto-detect
+Model: {}
+Error
+Failed to remove configuration
+UART: {}
+Baud: {}
+Lock acquired
+Acquiring lock...
+Latitude
+Longitude
+Altitude
+Speed
+Heading
+Satellites
+Add GPS
+{:.1f} km/h
+{:.1f} m
+{:.0f} deg {}

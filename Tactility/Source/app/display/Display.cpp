@@ -1,6 +1,7 @@
 #include <Tactility/Tactility.h>
 
 #include <tactility/lvgl_icon_shared.h>
+#include <Tactility/app/display/TextResources.h>
 
 #ifdef ESP_PLATFORM
 #include <Tactility/service/displayidle/DisplayIdleService.h>
@@ -9,6 +10,7 @@
 #include <Tactility/Logger.h>
 #include <Tactility/hal/display/DisplayDevice.h>
 #include <Tactility/lvgl/Toolbar.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/settings/DisplaySettings.h>
 
 #include <lvgl.h>
@@ -17,6 +19,55 @@
 namespace tt::app::display {
 
 static const auto LOGGER = Logger("Display");
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/Display/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/Display/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
+
+static std::string getLocalizedAppName() {
+    return getTextResources()[i18n::Text::APP_NAME];
+}
+
+static std::string getOrientationOptions() {
+    auto& textResources = getTextResources();
+    return textResources[i18n::Text::LANDSCAPE] + "\n" +
+        textResources[i18n::Text::PORTRAIT_RIGHT] + "\n" +
+        textResources[i18n::Text::LANDSCAPE_FLIPPED] + "\n" +
+        textResources[i18n::Text::PORTRAIT_LEFT];
+}
+
+static std::string getTimeoutOptions() {
+    auto& textResources = getTextResources();
+    return textResources[i18n::Text::TIMEOUT_15_SECONDS] + "\n" +
+        textResources[i18n::Text::TIMEOUT_30_SECONDS] + "\n" +
+        textResources[i18n::Text::TIMEOUT_1_MINUTE] + "\n" +
+        textResources[i18n::Text::TIMEOUT_2_MINUTES] + "\n" +
+        textResources[i18n::Text::TIMEOUT_5_MINUTES] + "\n" +
+        textResources[i18n::Text::TIMEOUT_NEVER];
+}
+
+static std::string getScreensaverOptions() {
+    auto& textResources = getTextResources();
+    return textResources[i18n::Text::SCREENSAVER_NONE] + "\n" +
+        textResources[i18n::Text::SCREENSAVER_BOUNCING_BALLS] + "\n" +
+        textResources[i18n::Text::SCREENSAVER_MYSTIFY] + "\n" +
+        textResources[i18n::Text::SCREENSAVER_MATRIX_RAIN];
+}
 
 static std::shared_ptr<hal::display::DisplayDevice> getHalDisplay() {
     return hal::findFirstDevice<hal::display::DisplayDevice>(hal::Device::Type::Display);
@@ -122,6 +173,7 @@ class DisplayApp final : public App {
 public:
 
     void onShow(AppContext& app, lv_obj_t* parent) override {
+        auto& textResources = getTextResources();
         displaySettings = settings::display::loadOrGetDefault();
         auto ui_density = lvgl_get_ui_density();
 
@@ -150,7 +202,7 @@ public:
             }
 
             auto* brightness_label = lv_label_create(brightness_wrapper);
-            lv_label_set_text(brightness_label, "Brightness");
+            lv_label_set_text(brightness_label, textResources[i18n::Text::BRIGHTNESS].c_str());
             lv_obj_align(brightness_label, LV_ALIGN_LEFT_MID, 0, 0);
 
             auto* brightness_slider = lv_slider_create(brightness_wrapper);
@@ -174,7 +226,7 @@ public:
             }
 
             auto* gamma_label = lv_label_create(gamma_wrapper);
-            lv_label_set_text(gamma_label, "Gamma");
+            lv_label_set_text(gamma_label, textResources[i18n::Text::GAMMA].c_str());
             lv_obj_align(gamma_label, LV_ALIGN_LEFT_MID, 0, 0);
             lv_obj_set_y(gamma_label, 0);
 
@@ -196,12 +248,13 @@ public:
         lv_obj_set_style_border_width(orientation_wrapper, 0, LV_STATE_DEFAULT);
 
         auto* orientation_label = lv_label_create(orientation_wrapper);
-        lv_label_set_text(orientation_label, "Orientation");
+        lv_label_set_text(orientation_label, textResources[i18n::Text::ORIENTATION].c_str());
         lv_obj_align(orientation_label, LV_ALIGN_LEFT_MID, 0, 0);
 
         auto* orientation_dropdown = lv_dropdown_create(orientation_wrapper);
         // Note: order correlates with settings::display::Orientation item order
-        lv_dropdown_set_options(orientation_dropdown, "Landscape\nPortrait Right\nLandscape Flipped\nPortrait Left");
+        const auto orientationOptions = getOrientationOptions();
+        lv_dropdown_set_options(orientation_dropdown, orientationOptions.c_str());
         lv_obj_align(orientation_dropdown, LV_ALIGN_RIGHT_MID, 0, 0);
         lv_obj_add_event_cb(orientation_dropdown, onOrientationSet, LV_EVENT_VALUE_CHANGED, this);
         // Set the dropdown to match current orientation enum
@@ -216,7 +269,7 @@ public:
             lv_obj_set_style_border_width(timeout_wrapper, 0, LV_STATE_DEFAULT);
 
             auto* timeout_label = lv_label_create(timeout_wrapper);
-            lv_label_set_text(timeout_label, "Auto screen off");
+            lv_label_set_text(timeout_label, textResources[i18n::Text::AUTO_SCREEN_OFF].c_str());
             lv_obj_align(timeout_label, LV_ALIGN_LEFT_MID, 0, 0);
 
             timeoutSwitch = lv_switch_create(timeout_wrapper);
@@ -232,11 +285,12 @@ public:
             lv_obj_set_style_border_width(timeout_select_wrapper, 0, LV_STATE_DEFAULT);
 
             auto* timeout_value_label = lv_label_create(timeout_select_wrapper);
-            lv_label_set_text(timeout_value_label, "Timeout");
+            lv_label_set_text(timeout_value_label, textResources[i18n::Text::TIMEOUT].c_str());
             lv_obj_align(timeout_value_label, LV_ALIGN_LEFT_MID, 0, 0);
 
             timeoutDropdown = lv_dropdown_create(timeout_select_wrapper);
-            lv_dropdown_set_options(timeoutDropdown, "15 seconds\n30 seconds\n1 minute\n2 minutes\n5 minutes\nNever");
+            const auto timeoutOptions = getTimeoutOptions();
+            lv_dropdown_set_options(timeoutDropdown, timeoutOptions.c_str());
             lv_obj_align(timeoutDropdown, LV_ALIGN_RIGHT_MID, 0, 0);
             lv_obj_add_event_cb(timeoutDropdown, onTimeoutChanged, LV_EVENT_VALUE_CHANGED, this);
             // Initialize dropdown selection from settings
@@ -265,12 +319,13 @@ public:
             lv_obj_set_style_border_width(screensaver_wrapper, 0, LV_STATE_DEFAULT);
 
             auto* screensaver_label = lv_label_create(screensaver_wrapper);
-            lv_label_set_text(screensaver_label, "Screensaver");
+            lv_label_set_text(screensaver_label, textResources[i18n::Text::SCREENSAVER].c_str());
             lv_obj_align(screensaver_label, LV_ALIGN_LEFT_MID, 0, 0);
 
             screensaverDropdown = lv_dropdown_create(screensaver_wrapper);
             // Note: order correlates with settings::display::ScreensaverType enum order
-            lv_dropdown_set_options(screensaverDropdown, "None\nBouncing Balls\nMystify\nMatrix Rain");
+            const auto screensaverOptions = getScreensaverOptions();
+            lv_dropdown_set_options(screensaverDropdown, screensaverOptions.c_str());
             lv_obj_align(screensaverDropdown, LV_ALIGN_RIGHT_MID, 0, 0);
             lv_obj_add_event_cb(screensaverDropdown, onScreensaverChanged, LV_EVENT_VALUE_CHANGED, this);
             lv_dropdown_set_selected(screensaverDropdown, static_cast<uint16_t>(displaySettings.screensaverType));
@@ -301,6 +356,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "Display",
     .appName = "Display",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_DISPLAY_SETTINGS,
     .appCategory = Category::Settings,
     .createApp = create<DisplayApp>
