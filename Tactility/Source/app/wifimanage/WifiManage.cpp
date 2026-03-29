@@ -124,7 +124,7 @@ void WifiManage::onShow(AppContext& app, lv_obj_t* parent) {
     // View update
     lock();
     isViewEnabled = true;
-    state.setConnectSsid("Connected"); // TODO update with proper SSID
+    state.setConnectSsid(service::wifi::getConnectionTarget());
     view.init(app, parent);
     view.update();
     unlock();

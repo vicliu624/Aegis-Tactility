@@ -3,6 +3,7 @@
 #include <Tactility/Logger.h>
 #include <Tactility/LogMessages.h>
 #include <Tactility/app/AppContext.h>
+#include <Tactility/app/LocalizedAppName.h>
 #include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/service/loader/Loader.h>
 #include <Tactility/service/wifi/Wifi.h>
@@ -12,6 +13,16 @@ namespace tt::app::wificonnect {
 static const auto LOGGER = Logger("WifiConnect");
 constexpr auto* WIFI_CONNECT_PARAM_SSID = "ssid"; // String
 constexpr auto* WIFI_CONNECT_PARAM_PASSWORD = "password"; // String
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/WifiConnect/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/WifiConnect/i18n";
+#endif
+
+static std::string getLocalizedAppName() {
+    return tt::app::getLocalizedAppNameFromPath(TEXT_RESOURCE_PATH);
+}
 
 extern const AppManifest manifest;
 
@@ -98,6 +109,7 @@ void WifiConnect::onHide(AppContext& app) {
 extern const AppManifest manifest = {
     .appId = "WifiConnect",
     .appName = "Wi-Fi Connect",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LV_SYMBOL_WIFI,
     .appCategory = Category::System,
     .appFlags = AppManifest::Flags::Hidden,

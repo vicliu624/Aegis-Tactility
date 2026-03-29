@@ -126,3 +126,17 @@ if __name__ == "__main__":
         "tt::app::wifimanage::i18n",
         "Data/system/app/WifiManage/i18n"
     )
+    # Wi-Fi connect app
+    generate(
+        "WifiConnect.csv",
+        "Tactility/Private/Tactility/app/wificonnect/TextResources.h",
+        "tt::app::wificonnect::i18n",
+        "Data/system/app/WifiConnect/i18n"
+    )
+    # Wi-Fi AP settings app
+    generate(
+        "WifiApSettings.csv",
+        "Tactility/Private/Tactility/app/wifiapsettings/TextResources.h",
+        "tt::app::wifiapsettings::i18n",
+        "Data/system/app/WifiApSettings/i18n"
+    )

@@ -1,10 +1,12 @@
 #include <Tactility/TactilityCore.h>
 
+#include <Tactility/app/wificonnect/TextResources.h>
 #include <Tactility/app/wificonnect/View.h>
 #include <Tactility/app/wificonnect/WifiConnect.h>
 #include <Tactility/Logger.h>
 #include <Tactility/lvgl/Toolbar.h>
 #include <Tactility/lvgl/Spinner.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/service/wifi/WifiApSettings.h>
 #include <Tactility/service/wifi/WifiGlobals.h>
 
@@ -14,6 +16,25 @@
 namespace tt::app::wificonnect {
 
 static const auto LOGGER = Logger("WifiConnect");
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/WifiConnect/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/WifiConnect/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
 
 void View::resetErrors() {
     lv_obj_add_flag(password_error, LV_OBJ_FLAG_HIDDEN);
@@ -32,7 +53,7 @@ static void onConnect(lv_event_t* event) {
     size_t ssid_len = strlen(ssid);
     if (ssid_len > TT_WIFI_SSID_LIMIT) {
         LOGGER.error("SSID too long");
-        lv_label_set_text(view.ssid_error, "SSID too long");
+        lv_label_set_text(view.ssid_error, getTextResources()[i18n::Text::SSID_TOO_LONG].c_str());
         lv_obj_remove_flag(view.ssid_error, LV_OBJ_FLAG_HIDDEN);
         return;
     }
@@ -41,7 +62,7 @@ static void onConnect(lv_event_t* event) {
     size_t password_len = strlen(password);
     if (password_len > TT_WIFI_CREDENTIALS_PASSWORD_LIMIT) {
         LOGGER.error("Password too long");
-        lv_label_set_text(view.password_error, "Password too long");
+        lv_label_set_text(view.password_error, getTextResources()[i18n::Text::PASSWORD_TOO_LONG].c_str());
         lv_obj_remove_flag(view.password_error, LV_OBJ_FLAG_HIDDEN);
         return;
     }
@@ -93,7 +114,7 @@ void View::createBottomButtons(lv_obj_t* parent) {
     lv_obj_align(remember_switch, LV_ALIGN_LEFT_MID, 0, 0);
 
     auto* remember_label = lv_label_create(button_container);
-    lv_label_set_text(remember_label, "Remember");
+    lv_label_set_text(remember_label, getTextResources()[i18n::Text::REMEMBER].c_str());
     lv_obj_align(remember_label, LV_ALIGN_CENTER, 0, 0);
     lv_obj_align_to(remember_label, remember_switch, LV_ALIGN_OUT_RIGHT_MID, 4, 0);
 
@@ -103,7 +124,7 @@ void View::createBottomButtons(lv_obj_t* parent) {
 
     connect_button = lv_btn_create(button_container);
     auto* connect_label = lv_label_create(connect_button);
-    lv_label_set_text(connect_label, "Connect");
+    lv_label_set_text(connect_label, getTextResources()[i18n::Text::CONNECT].c_str());
     lv_obj_align(connect_button, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_add_event_cb(connect_button, &onConnect, LV_EVENT_SHORT_CLICKED, nullptr);
 }
@@ -138,7 +159,7 @@ void View::init(AppContext& app, lv_obj_t* parent) {
     lv_obj_set_style_pad_right(ssid_label_wrapper, 0, LV_STATE_DEFAULT);
 
     auto* ssid_label = lv_label_create(ssid_label_wrapper);
-    lv_label_set_text(ssid_label, "Network:");
+    lv_label_set_text(ssid_label, getTextResources()[i18n::Text::NETWORK_LABEL].c_str());
 
     ssid_textarea = lv_textarea_create(ssid_wrapper);
     lv_textarea_set_one_line(ssid_textarea, true);
@@ -167,7 +188,7 @@ void View::init(AppContext& app, lv_obj_t* parent) {
     lv_obj_set_style_pad_right(password_label_wrapper, 0, LV_STATE_DEFAULT);
 
     auto* password_label = lv_label_create(password_label_wrapper);
-    lv_label_set_text(password_label, "Password:");
+    lv_label_set_text(password_label, getTextResources()[i18n::Text::PASSWORD_LABEL].c_str());
 
     password_textarea = lv_textarea_create(password_wrapper);
     lv_textarea_set_one_line(password_textarea, true);
@@ -210,7 +231,7 @@ void View::update() {
     if (state->hasConnectionError()) {
         setLoading(false);
         resetErrors();
-        lv_label_set_text(connection_error, "Connection failed");
+        lv_label_set_text(connection_error, getTextResources()[i18n::Text::CONNECTION_FAILED].c_str());
         lv_obj_remove_flag(connection_error, LV_OBJ_FLAG_HIDDEN);
     }
 }

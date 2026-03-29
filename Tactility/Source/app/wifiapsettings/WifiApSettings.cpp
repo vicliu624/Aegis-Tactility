@@ -5,18 +5,44 @@
 #include <Tactility/app/App.h>
 #include <Tactility/app/AppContext.h>
 #include <Tactility/app/AppManifest.h>
+#include <Tactility/app/LocalizedAppName.h>
+#include <Tactility/app/wifiapsettings/TextResources.h>
 #include <Tactility/app/alertdialog/AlertDialog.h>
-#include <tactility/check.h>
 #include <Tactility/lvgl/Style.h>
 #include <Tactility/lvgl/Toolbar.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/service/wifi/Wifi.h>
 #include <Tactility/service/wifi/WifiApSettings.h>
+#include <tactility/check.h>
 
 #include <lvgl.h>
 
 namespace tt::app::wifiapsettings {
 
 static const auto LOGGER = Logger("WifiApSettings");
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/WifiApSettings/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/WifiApSettings/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
+
+static std::string getLocalizedAppName() {
+    return getTextResources()[i18n::Text::APP_NAME];
+}
 
 extern const AppManifest manifest;
 
@@ -36,11 +62,16 @@ class WifiApSettings : public App {
     PubSub<service::wifi::WifiEvent>::SubscriptionHandle wifiSubscription = nullptr;
 
     static void onPressForget(lv_event_t* event) {
+        auto& textResources = getTextResources();
         std::vector<std::string> choices = {
-            "Yes",
-            "No"
+            textResources[i18n::Text::YES],
+            textResources[i18n::Text::NO]
         };
-        alertdialog::start("Confirmation", "Forget the Wi-Fi access point?", choices);
+        alertdialog::start(
+            textResources[i18n::Text::CONFIRMATION_TITLE],
+            textResources[i18n::Text::FORGET_CONFIRMATION],
+            choices
+        );
     }
 
     static void onToggleAutoConnect(lv_event_t* event) {
@@ -152,14 +183,14 @@ public:
         lv_obj_add_event_cb(disconnectButton, onPressDisconnect, LV_EVENT_SHORT_CLICKED, nullptr);
         auto* disconnect_label = lv_label_create(disconnectButton);
         lv_obj_align(disconnect_label, LV_ALIGN_CENTER, 0, 0);
-        lv_label_set_text(disconnect_label, "Disconnect");
+        lv_label_set_text(disconnect_label, getTextResources()[i18n::Text::DISCONNECT].c_str());
 
         connectButton = lv_button_create(wrapper);
         lv_obj_set_width(connectButton, LV_PCT(100));
         lv_obj_add_event_cb(connectButton, onPressConnect, LV_EVENT_SHORT_CLICKED, nullptr);
         auto* connect_label = lv_label_create(connectButton);
         lv_obj_align(connect_label, LV_ALIGN_CENTER, 0, 0);
-        lv_label_set_text(connect_label, "Connect");
+        lv_label_set_text(connect_label, getTextResources()[i18n::Text::CONNECT].c_str());
 
         // Forget
 
@@ -168,7 +199,7 @@ public:
         lv_obj_add_event_cb(forget_button, onPressForget, LV_EVENT_SHORT_CLICKED, nullptr);
         auto* forget_button_label = lv_label_create(forget_button);
         lv_obj_align(forget_button_label, LV_ALIGN_CENTER, 0, 0);
-        lv_label_set_text(forget_button_label, "Forget");
+        lv_label_set_text(forget_button_label, getTextResources()[i18n::Text::FORGET].c_str());
 
         // Auto-connect
 
@@ -179,7 +210,7 @@ public:
         lv_obj_set_style_border_width(auto_connect_wrapper, 0, LV_STATE_DEFAULT);
 
         auto* auto_connect_label = lv_label_create(auto_connect_wrapper);
-        lv_label_set_text(auto_connect_label, "Auto-connect");
+        lv_label_set_text(auto_connect_label, getTextResources()[i18n::Text::AUTO_CONNECT].c_str());
         lv_obj_align(auto_connect_label, LV_ALIGN_LEFT_MID, 0, 0);
 
         auto* auto_connect_switch = lv_switch_create(auto_connect_wrapper);
@@ -245,6 +276,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "WifiApSettings",
     .appName = "Wi-Fi AP Settings",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LV_SYMBOL_WIFI,
     .appCategory = Category::System,
     .appFlags = AppManifest::Flags::Hidden,
