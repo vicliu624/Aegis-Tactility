@@ -49,6 +49,7 @@ static Dispatcher mainDispatcher;
 namespace service {
     // Primary
     namespace gps { extern const ServiceManifest manifest; }
+    namespace reticulum { extern const ServiceManifest manifest; }
     namespace wifi { extern const ServiceManifest manifest; }
 #ifdef ESP_PLATFORM
     namespace development { extern const ServiceManifest manifest; }
@@ -270,6 +271,7 @@ static void registerAndStartPrimaryServices() {
 #if defined(CONFIG_SOC_WIFI_SUPPORTED) && !defined(CONFIG_SLAVE_SOC_WIFI_SUPPORTED)
     addService(service::espnow::manifest);
 #endif
+    addService(service::reticulum::manifest);
 #ifdef ESP_PLATFORM
     addService(service::webserver::manifest);
 #endif
