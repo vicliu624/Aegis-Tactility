@@ -13,6 +13,7 @@
 #include <Tactility/service/reticulum/ReticulumService.h>
 #include <Tactility/service/reticulum/TransportCore.h>
 #include <Tactility/service/reticulum/interfaces/EspNowInterface.h>
+#include <Tactility/kernel/Kernel.h>
 
 #include <algorithm>
 #include <format>
@@ -58,6 +59,53 @@ void ReticulumService::setRuntimeState(RuntimeState newState, const char* detail
 
 void ReticulumService::publishEvent(ReticulumEvent event) {
     pubsub->publish(std::move(event));
+}
+
+void ReticulumService::observeAnnounce(AnnounceInfo announce) {
+    {
+        auto lock = mutex.asScopedLock();
+        lock.lock();
+
+        auto iterator = std::find_if(observedAnnounces.begin(), observedAnnounces.end(), [&announce](const auto& existing) {
+            return existing.destination == announce.destination;
+        });
+
+        if (iterator != observedAnnounces.end()) {
+            iterator->interfaceId = announce.interfaceId;
+            iterator->interfaceKind = announce.interfaceKind;
+            iterator->nextHop = std::move(announce.nextHop);
+            iterator->appData = std::move(announce.appData);
+            iterator->hops = announce.hops;
+            iterator->context = announce.context;
+            iterator->local = iterator->local || announce.local;
+            iterator->pathResponse = announce.pathResponse;
+            iterator->provisional = iterator->provisional && announce.provisional;
+            iterator->observedTick = announce.observedTick;
+            announce = *iterator;
+        } else {
+            observedAnnounces.push_back(announce);
+        }
+    }
+
+    publishEvent(ReticulumEvent {
+        .type = EventType::AnnounceObserved,
+        .runtimeState = getRuntimeState(),
+        .announce = announce,
+        .destination = announce.destination,
+        .detail = announce.local
+            ? std::format("Local announce ready for {}", toHex(announce.destination))
+            : std::format("Observed announce for {} via {}", toHex(announce.destination), announce.interfaceId.empty() ? "unknown interface" : announce.interfaceId)
+    });
+}
+
+void ReticulumService::publishPathTableChanged(const PathEntry& entry, std::string detail) {
+    publishEvent(ReticulumEvent {
+        .type = EventType::PathTableChanged,
+        .runtimeState = getRuntimeState(),
+        .path = entry,
+        .destination = entry.destination,
+        .detail = detail.empty() ? std::format("Path updated for {}", toHex(entry.destination)) : std::move(detail)
+    });
 }
 
 bool ReticulumService::onStart(ServiceContext& serviceContext) {
@@ -115,6 +163,12 @@ void ReticulumService::onStop(ServiceContext& serviceContext) {
 
     if (dispatcher->isStarted()) {
         dispatcher->stop();
+    }
+
+    {
+        auto lock = mutex.asScopedLock();
+        lock.lock();
+        observedAnnounces.clear();
     }
 
     setRuntimeState(RuntimeState::Stopped);
@@ -189,6 +243,18 @@ bool ReticulumService::registerLocalDestination(const LocalDestination& destinat
             .destination = iterator->hash,
             .detail = std::format("Registered local destination {} ({})", iterator->name, toHex(iterator->hash))
         });
+
+        if (iterator->announceEnabled) {
+            observeAnnounce(AnnounceInfo {
+                .destination = iterator->hash,
+                .appData = iterator->appData,
+                .hops = 0,
+                .local = true,
+                .pathResponse = false,
+                .provisional = iterator->provisionalHash,
+                .observedTick = kernel::getTicks()
+            });
+        }
     }
 
     return true;
@@ -196,6 +262,12 @@ bool ReticulumService::registerLocalDestination(const LocalDestination& destinat
 
 std::vector<RegisteredDestination> ReticulumService::getLocalDestinations() {
     return destinationRegistry->getLocalDestinations();
+}
+
+std::vector<AnnounceInfo> ReticulumService::getAnnounces() {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    return observedAnnounces;
 }
 
 std::vector<PathEntry> ReticulumService::getPaths() {
@@ -251,6 +323,29 @@ void ReticulumService::onInboundFrame(InboundFrame frame) {
             .packet = packet,
             .detail = "Captured packet envelope summary"
         });
+
+        const auto announce = packetCodec->extractAnnounce(frame);
+        if (announce.has_value()) {
+            observeAnnounce(*announce);
+
+            if (!announce->local && !announce->nextHop.empty()) {
+                const PathEntry entry {
+                    .destination = announce->destination,
+                    .interfaceId = announce->interfaceId,
+                    .nextHop = announce->nextHop,
+                    .hops = announce->hops,
+                    .expiryTick = kernel::getTicks() + kernel::secondsToTicks(60 * 60),
+                    .unresponsive = false
+                };
+
+                const auto existing = transportCore->getPath(entry.destination);
+                transportCore->installPath(entry);
+                publishPathTableChanged(entry, existing.has_value()
+                    ? std::format("Refreshed path for {} via {}", toHex(entry.destination), entry.interfaceId)
+                    : std::format("Installed path for {} via {}", toHex(entry.destination), entry.interfaceId)
+                );
+            }
+        }
     });
 }
 

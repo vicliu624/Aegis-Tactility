@@ -31,6 +31,8 @@ bool registerLocalDestination(const LocalDestination& destination);
 
 std::vector<RegisteredDestination> getLocalDestinations();
 
+std::vector<AnnounceInfo> getAnnounces();
+
 std::vector<PathEntry> getPaths();
 
 std::vector<LinkInfo> getLinks();

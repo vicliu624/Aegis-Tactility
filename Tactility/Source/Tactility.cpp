@@ -90,6 +90,7 @@ namespace app {
     namespace boot { extern const AppManifest manifest; }
     namespace development { extern const AppManifest manifest; }
     namespace display { extern const AppManifest manifest; }
+    namespace contacts { extern const AppManifest manifest; }
     namespace files { extern const AppManifest manifest; }
     namespace fileselection { extern const AppManifest manifest; }
     namespace gpssettings { extern const AppManifest manifest; }
@@ -141,6 +142,7 @@ static void registerInternalApps() {
     addAppManifest(app::apphubdetails::manifest);
     addAppManifest(app::applist::manifest);
     addAppManifest(app::appsettings::manifest);
+    addAppManifest(app::contacts::manifest);
     addAppManifest(app::display::manifest);
     addAppManifest(app::files::manifest);
     addAppManifest(app::fileselection::manifest);

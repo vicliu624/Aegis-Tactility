@@ -33,6 +33,19 @@ bool TransportCore::removePath(const DestinationHash& destinationHash) {
     }) > 0;
 }
 
+std::optional<PathEntry> TransportCore::getPath(const DestinationHash& destinationHash) const {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+
+    for (const auto& entry : paths) {
+        if (entry.destination == destinationHash) {
+            return entry;
+        }
+    }
+
+    return std::nullopt;
+}
+
 std::vector<PathEntry> TransportCore::getPaths() const {
     auto lock = mutex.asScopedLock();
     lock.lock();

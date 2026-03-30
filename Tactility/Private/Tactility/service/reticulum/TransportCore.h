@@ -3,6 +3,7 @@
 #include <Tactility/RecursiveMutex.h>
 #include <Tactility/service/reticulum/Types.h>
 
+#include <optional>
 #include <vector>
 
 namespace tt::service::reticulum {
@@ -19,6 +20,8 @@ public:
     bool installPath(const PathEntry& entry);
 
     bool removePath(const DestinationHash& destinationHash);
+
+    std::optional<PathEntry> getPath(const DestinationHash& destinationHash) const;
 
     std::vector<PathEntry> getPaths() const;
 };

@@ -35,6 +35,7 @@ bool EspNowInterface::start() {
             frame.interfaceId = getId();
             frame.interfaceKind = getKind();
             frame.metrics = getMetrics();
+            frame.nextHop.assign(receiveInfo->src_addr, receiveInfo->src_addr + ESP_NOW_ETH_ALEN);
             frame.payload.assign(data, data + length);
             receiveCallback(std::move(frame));
         }

@@ -109,6 +109,7 @@ struct InboundFrame {
     std::string interfaceId {};
     InterfaceKind interfaceKind = InterfaceKind::Unknown;
     InterfaceMetrics metrics {};
+    std::vector<uint8_t> nextHop {};
     std::vector<uint8_t> payload {};
 };
 
@@ -151,6 +152,20 @@ struct ResourceInfo {
     ResourceState state = ResourceState::None;
     size_t transferSize = 0;
     size_t totalSize = 0;
+};
+
+struct AnnounceInfo {
+    DestinationHash destination {};
+    std::string interfaceId {};
+    InterfaceKind interfaceKind = InterfaceKind::Unknown;
+    std::vector<uint8_t> nextHop {};
+    std::vector<uint8_t> appData {};
+    uint8_t hops = 0;
+    uint8_t context = 0;
+    bool local = false;
+    bool pathResponse = false;
+    bool provisional = true;
+    uint32_t observedTick = 0;
 };
 
 struct PacketSummary {

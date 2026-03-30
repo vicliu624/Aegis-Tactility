@@ -29,6 +29,7 @@ class ReticulumService final : public Service {
     RuntimeState runtimeState = RuntimeState::Stopped;
     std::shared_ptr<PubSub<ReticulumEvent>> pubsub = std::make_shared<PubSub<ReticulumEvent>>();
     std::unique_ptr<DispatcherThread> dispatcher = std::make_unique<DispatcherThread>("reticulum_dispatcher", 6144);
+    std::vector<AnnounceInfo> observedAnnounces {};
 
     std::unique_ptr<IdentityStore> identityStore;
     std::unique_ptr<DestinationRegistry> destinationRegistry;
@@ -41,6 +42,10 @@ class ReticulumService final : public Service {
     void setRuntimeState(RuntimeState newState, const char* detail = nullptr);
 
     void publishEvent(ReticulumEvent event);
+
+    void observeAnnounce(AnnounceInfo announce);
+
+    void publishPathTableChanged(const PathEntry& entry, std::string detail);
 
     void onInboundFrame(InboundFrame frame);
 
@@ -62,6 +67,8 @@ public:
     bool registerLocalDestination(const LocalDestination& destination);
 
     std::vector<RegisteredDestination> getLocalDestinations();
+
+    std::vector<AnnounceInfo> getAnnounces();
 
     std::vector<PathEntry> getPaths();
 

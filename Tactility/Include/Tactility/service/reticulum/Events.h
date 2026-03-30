@@ -14,6 +14,7 @@ enum class EventType {
     InterfaceStarted,
     InterfaceStopped,
     LocalDestinationRegistered,
+    AnnounceObserved,
     InboundFrameQueued,
     PacketDecoded,
     PathTableChanged,
@@ -27,6 +28,8 @@ struct ReticulumEvent {
     RuntimeState runtimeState = RuntimeState::Stopped;
     std::optional<InterfaceDescriptor> interface {};
     std::optional<PacketSummary> packet {};
+    std::optional<AnnounceInfo> announce {};
+    std::optional<PathEntry> path {};
     std::optional<DestinationHash> destination {};
     std::string detail {};
 };

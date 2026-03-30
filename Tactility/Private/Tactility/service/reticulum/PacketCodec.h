@@ -12,6 +12,8 @@ class PacketCodec final {
 public:
 
     std::optional<PacketSummary> summarize(const std::vector<uint8_t>& packet) const;
+
+    std::optional<AnnounceInfo> extractAnnounce(const InboundFrame& frame) const;
 };
 
 } // namespace tt::service::reticulum

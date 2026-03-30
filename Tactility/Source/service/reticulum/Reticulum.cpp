@@ -65,6 +65,11 @@ std::vector<RegisteredDestination> getLocalDestinations() {
     return service != nullptr ? service->getLocalDestinations() : std::vector<RegisteredDestination> {};
 }
 
+std::vector<AnnounceInfo> getAnnounces() {
+    auto service = findService();
+    return service != nullptr ? service->getAnnounces() : std::vector<AnnounceInfo> {};
+}
+
 std::vector<PathEntry> getPaths() {
     auto service = findService();
     return service != nullptr ? service->getPaths() : std::vector<PathEntry> {};
