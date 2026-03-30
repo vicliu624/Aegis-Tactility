@@ -31,7 +31,7 @@ class ChatState {
 
     std::deque<StoredMessage> messages;
     std::string currentChannel = "#general";
-    std::string localNickname = "Device";
+    std::string localNickname {};
 
 public:
     ChatState() = default;

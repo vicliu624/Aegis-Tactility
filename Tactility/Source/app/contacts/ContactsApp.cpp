@@ -1,4 +1,5 @@
 #include <Tactility/app/AppContext.h>
+#include <Tactility/app/contacts/TextResources.h>
 #include <Tactility/app/AppManifest.h>
 #include <Tactility/app/AppRegistration.h>
 #include <Tactility/Logger.h>
@@ -6,6 +7,7 @@
 #include <Tactility/PubSub.h>
 #include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/lvgl/Toolbar.h>
+#include <Tactility/settings/Language.h>
 #include <Tactility/service/reticulum/Reticulum.h>
 
 #include <algorithm>
@@ -20,6 +22,89 @@
 namespace tt::app::contacts {
 
 static const auto LOGGER = Logger("Contacts");
+
+#ifdef ESP_PLATFORM
+constexpr auto* TEXT_RESOURCE_PATH = "/system/app/Contacts/i18n";
+#else
+constexpr auto* TEXT_RESOURCE_PATH = "system/app/Contacts/i18n";
+#endif
+
+static tt::i18n::TextResources& getTextResources() {
+    static tt::i18n::TextResources textResources(TEXT_RESOURCE_PATH);
+    static std::string loadedLocale;
+
+    const auto currentLocale = tt::settings::toString(tt::settings::getLanguage());
+    if (loadedLocale != currentLocale) {
+        textResources.load();
+        loadedLocale = currentLocale;
+    }
+
+    return textResources;
+}
+
+template <typename... Args>
+static std::string formatText(i18n::Text key, Args&&... args) {
+    return std::vformat(getTextResources()[key], std::make_format_args(args...));
+}
+
+static std::string getLocalizedAppName() {
+    return getTextResources()[i18n::Text::APP_NAME];
+}
+
+static std::string getRuntimeStateLabel(service::reticulum::RuntimeState state) {
+    switch (state) {
+        case service::reticulum::RuntimeState::Starting:
+            return getTextResources()[i18n::Text::RUNTIME_STARTING];
+        case service::reticulum::RuntimeState::Ready:
+            return getTextResources()[i18n::Text::RUNTIME_READY];
+        case service::reticulum::RuntimeState::Stopping:
+            return getTextResources()[i18n::Text::RUNTIME_STOPPING];
+        case service::reticulum::RuntimeState::Stopped:
+            return getTextResources()[i18n::Text::RUNTIME_STOPPED];
+        case service::reticulum::RuntimeState::Faulted:
+            return getTextResources()[i18n::Text::RUNTIME_FAULTED];
+    }
+
+    return getTextResources()[i18n::Text::RUNTIME_STOPPED];
+}
+
+static std::string getInterfaceKindLabel(service::reticulum::InterfaceKind kind) {
+    switch (kind) {
+        case service::reticulum::InterfaceKind::EspNow:
+            return "ESP-NOW";
+        case service::reticulum::InterfaceKind::LoRa:
+            return "LoRa";
+        case service::reticulum::InterfaceKind::Unknown:
+            return getTextResources()[i18n::Text::INTERFACE_KIND_UNKNOWN];
+    }
+
+    return getTextResources()[i18n::Text::INTERFACE_KIND_UNKNOWN];
+}
+
+static std::string describeEvent(const service::reticulum::ReticulumEvent& event) {
+    switch (event.type) {
+        case service::reticulum::EventType::RuntimeStateChanged:
+            return formatText(i18n::Text::EVENT_RUNTIME_STATE_CHANGED_FMT, getRuntimeStateLabel(event.runtimeState));
+        case service::reticulum::EventType::InterfaceAttached:
+            return getTextResources()[i18n::Text::EVENT_INTERFACE_ATTACHED];
+        case service::reticulum::EventType::InterfaceDetached:
+            return getTextResources()[i18n::Text::EVENT_INTERFACE_DETACHED];
+        case service::reticulum::EventType::InterfaceStarted:
+            return getTextResources()[i18n::Text::EVENT_INTERFACE_STARTED];
+        case service::reticulum::EventType::InterfaceStopped:
+            return getTextResources()[i18n::Text::EVENT_INTERFACE_STOPPED];
+        case service::reticulum::EventType::LocalDestinationRegistered:
+            return getTextResources()[i18n::Text::EVENT_LOCAL_DESTINATION_REGISTERED];
+        case service::reticulum::EventType::AnnounceObserved:
+            return getTextResources()[i18n::Text::EVENT_ANNOUNCE_OBSERVED];
+        case service::reticulum::EventType::PathTableChanged:
+            return getTextResources()[i18n::Text::EVENT_PATH_TABLE_CHANGED];
+        case service::reticulum::EventType::Error:
+            return getTextResources()[i18n::Text::EVENT_ERROR];
+        default:
+            return getTextResources()[i18n::Text::RETICULUM_UPDATED];
+    }
+}
 
 struct ContactRecord {
     service::reticulum::DestinationHash destination {};
@@ -65,14 +150,14 @@ static std::string shortenHash(const service::reticulum::DestinationHash& destin
 
 static std::string makeInterfaceSummary(const ContactRecord& record) {
     if (record.local) {
-        return "local destination";
+        return getTextResources()[i18n::Text::LOCAL_DESTINATION];
     }
 
     if (!record.interfaceId.empty()) {
-        return std::format("{} via {}", service::reticulum::interfaceKindToString(record.interfaceKind), record.interfaceId);
+        return formatText(i18n::Text::VIA_INTERFACE_FMT, getInterfaceKindLabel(record.interfaceKind), record.interfaceId);
     }
 
-    return "interface unknown";
+    return getTextResources()[i18n::Text::INTERFACE_UNKNOWN];
 }
 
 class ContactsApp final : public App {
@@ -82,7 +167,7 @@ class ContactsApp final : public App {
     PubSub<ReticulumEvent>::SubscriptionHandle reticulumSubscription = nullptr;
     Mutex mutex;
     std::vector<ContactRecord> contacts {};
-    std::string latestEvent = "Waiting for Reticulum events";
+    std::string latestEvent = getTextResources()[i18n::Text::WAITING_FOR_EVENTS];
     service::reticulum::RuntimeState runtimeState = service::reticulum::RuntimeState::Stopped;
     bool viewEnabled = false;
 
@@ -93,7 +178,7 @@ class ContactsApp final : public App {
 
     static void onRefreshPressed(lv_event_t* event) {
         auto* self = static_cast<ContactsApp*>(lv_event_get_user_data(event));
-        self->reloadFromService("Manual refresh");
+        self->reloadFromService(getTextResources()[i18n::Text::MANUAL_REFRESH]);
     }
 
     static void configureListButton(lv_obj_t* button) {
@@ -137,8 +222,12 @@ class ContactsApp final : public App {
             entry.local = true;
             entry.hasAnnounce = destination.announceEnabled;
             entry.title = destination.name;
-            entry.subtitle = std::format("{} ({})", destination.acceptsLinks ? "accepts links" : "no links", shortenHash(destination.hash));
-            entry.detail = destination.provisionalHash ? "provisional local destination" : "local destination";
+            entry.subtitle = formatText(i18n::Text::LOCAL_SUBTITLE_FMT,
+                destination.acceptsLinks ? getTextResources()[i18n::Text::ACCEPTS_LINKS] : getTextResources()[i18n::Text::NO_LINKS],
+                shortenHash(destination.hash));
+            entry.detail = destination.provisionalHash
+                ? getTextResources()[i18n::Text::PROVISIONAL_LOCAL_DESTINATION]
+                : getTextResources()[i18n::Text::LOCAL_DESTINATION];
         }
 
         for (const auto& announce : service::reticulum::getAnnounces()) {
@@ -157,8 +246,8 @@ class ContactsApp final : public App {
 
             entry.subtitle = std::format("{} | {}", shortenHash(announce.destination), makeInterfaceSummary(entry));
             entry.detail = announce.pathResponse
-                ? std::format("path-response announce, hops={}", announce.hops)
-                : std::format("announce observed, hops={}", announce.hops);
+                ? formatText(i18n::Text::PATH_RESPONSE_ANNOUNCE_FMT, announce.hops)
+                : formatText(i18n::Text::ANNOUNCE_OBSERVED_FMT, announce.hops);
         }
 
         for (const auto& path : service::reticulum::getPaths()) {
@@ -166,9 +255,13 @@ class ContactsApp final : public App {
             entry.hasPath = true;
             entry.interfaceId = path.interfaceId;
             entry.hops = path.hops;
-            const auto pathSummary = path.interfaceId.empty() ? std::string("path learned") : std::format("path via {}", path.interfaceId);
+            const auto pathSummary = path.interfaceId.empty()
+                ? getTextResources()[i18n::Text::PATH_LEARNED]
+                : formatText(i18n::Text::PATH_VIA_FMT, path.interfaceId);
             entry.subtitle = std::format("{} | {}", shortenHash(path.destination), pathSummary);
-            entry.detail = std::format("reachable in {} hop(s){}", path.hops, path.unresponsive ? ", marked unresponsive" : "");
+            entry.detail = formatText(i18n::Text::REACHABLE_FMT,
+                path.hops,
+                path.unresponsive ? getTextResources()[i18n::Text::UNRESPONSIVE_SUFFIX] : std::string {});
         }
 
         std::ranges::sort(contacts, [](const auto& left, const auto& right) {
@@ -194,27 +287,25 @@ class ContactsApp final : public App {
 
         const auto announceCount = static_cast<int>(service::reticulum::getAnnounces().size());
         const auto pathCount = static_cast<int>(service::reticulum::getPaths().size());
-        lv_label_set_text_fmt(summaryLabel,
-            "Reticulum: %s\nContacts: %d | announces: %d | paths: %d",
-            service::reticulum::runtimeStateToString(runtimeState),
+        const auto summaryText = formatText(i18n::Text::SUMMARY_FMT,
+            getRuntimeStateLabel(runtimeState),
             static_cast<int>(contacts.size()),
             announceCount,
-            pathCount
-        );
+            pathCount);
+        lv_label_set_text(summaryLabel, summaryText.c_str());
         lv_label_set_text(eventLabel, latestEvent.c_str());
 
         lv_obj_clean(list);
         if (contacts.empty()) {
-            lv_list_add_text(list, "No contacts observed yet");
+            lv_list_add_text(list, getTextResources()[i18n::Text::NO_CONTACTS_OBSERVED].c_str());
             return;
         }
 
         for (const auto& contact : contacts) {
-            const auto line = std::format("{}\n{}\n{}",
+            const auto line = formatText(i18n::Text::CONTACT_LINE_FMT,
                 contact.title,
                 contact.subtitle.empty() ? shortenHash(contact.destination) : contact.subtitle,
-                contact.detail.empty() ? "no additional detail" : contact.detail
-            );
+                contact.detail.empty() ? getTextResources()[i18n::Text::NO_ADDITIONAL_DETAIL] : contact.detail);
 
             const char* icon = contact.local
                 ? LV_SYMBOL_HOME
@@ -258,7 +349,7 @@ class ContactsApp final : public App {
             case service::reticulum::EventType::InterfaceDetached:
             case service::reticulum::EventType::InterfaceStarted:
             case service::reticulum::EventType::InterfaceStopped:
-                rebuildContactsLocked(event.detail.empty() ? "Reticulum updated" : event.detail);
+                rebuildContactsLocked(describeEvent(event));
                 requestViewUpdateLocked();
                 break;
             default:
@@ -275,7 +366,7 @@ public:
             });
         }
 
-        reloadFromService("Contacts subscribed to Reticulum");
+        reloadFromService(getTextResources()[i18n::Text::SUBSCRIBED]);
     }
 
     void onDestroy(AppContext& appContext) override {
@@ -295,7 +386,7 @@ public:
         lv_obj_set_style_pad_row(parent, 0, LV_STATE_DEFAULT);
 
         toolbar = lvgl::toolbar_create(parent, appContext);
-        lvgl::toolbar_add_text_button_action(toolbar, "Refresh", onRefreshPressed, this);
+        lvgl::toolbar_add_text_button_action(toolbar, getTextResources()[i18n::Text::REFRESH].c_str(), onRefreshPressed, this);
 
         summaryLabel = lv_label_create(parent);
         lv_obj_set_width(summaryLabel, LV_PCT(100));
@@ -328,6 +419,7 @@ public:
 extern const AppManifest manifest = {
     .appId = "Contacts",
     .appName = "Contacts",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_FORUM,
     .appCategory = Category::System,
     .createApp = create<ContactsApp>

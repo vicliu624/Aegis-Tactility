@@ -139,6 +139,77 @@ def configure_device(idf_python: Path, env: dict[str, str], device_id: str) -> N
     run([str(idf_python), str(REPO_ROOT / "device.py"), device_id], env=env)
 
 
+def read_flash_args(build_dir: str) -> tuple[list[str], dict[str, tuple[str, str]]]:
+    flash_args_path = REPO_ROOT / build_dir / "flash_args"
+    if not flash_args_path.exists():
+        die(f"flash_args not found at {flash_args_path}. Run a build first.")
+
+    flash_options: list[str] = []
+    entries: dict[str, tuple[str, str]] = {}
+    for raw_line in flash_args_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.startswith("-"):
+            flash_options.extend(line.split())
+            continue
+
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+
+        offset, relative_path = parts
+        entries[Path(relative_path).name] = (offset, relative_path)
+
+    return flash_options, entries
+
+
+def run_partial_flash(
+    idf_python: Path,
+    idf_path: Path,
+    env: dict[str, str],
+    build_dir: str,
+    port: str,
+    idf_target: str,
+    artifact_names: tuple[str, ...],
+) -> None:
+    flash_options, entries = read_flash_args(build_dir)
+    missing = [name for name in artifact_names if name not in entries]
+    if missing:
+        die(
+            "The following flash artifacts were not found in "
+            f"{REPO_ROOT / build_dir / 'flash_args'}: {', '.join(missing)}"
+        )
+
+    esptool_py = idf_path / "components" / "esptool_py" / "esptool" / "esptool.py"
+    if not esptool_py.exists():
+        die(f"esptool.py not found at {esptool_py}")
+
+    command = [
+        str(idf_python),
+        str(esptool_py),
+        "--chip",
+        idf_target,
+        "-p",
+        port,
+        "-b",
+        "460800",
+        "--before",
+        "default_reset",
+        "--after",
+        "hard_reset",
+        "write_flash",
+    ]
+    command.extend(flash_options)
+
+    for artifact_name in artifact_names:
+        offset, relative_path = entries[artifact_name]
+        command.extend([offset, relative_path])
+
+    run(command, env=env, cwd=REPO_ROOT / build_dir)
+
+
 def run_idf(
     idf_python: Path,
     idf_path: Path,
@@ -163,7 +234,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run ESP-IDF 5.5.4 commands for this repository without depending on the caller's shell state."
     )
-    parser.add_argument("action", choices=("doctor", "build", "flash", "monitor", "fullclean"))
+    parser.add_argument("action", choices=("doctor", "build", "flash", "flash-app-system", "monitor", "fullclean"))
     parser.add_argument("--device", required=True, help="Device id, for example lilygo-tdeck or m5stack-tab5")
     parser.add_argument("--build-dir", help="Build directory, for example build-tdeck")
     parser.add_argument("--port", help="Serial port used for flash/monitor, for example COM7")
@@ -179,7 +250,7 @@ def main() -> None:
     idf_target = read_device_target(args.device)
 
     if args.action != "doctor" and not args.build_dir:
-        die("--build-dir is required for build, flash, monitor, and fullclean")
+        die("--build-dir is required for build, flash, flash-app-system, monitor, and fullclean")
 
     print(f"Using device: {args.device}")
     print(f"Using target: {idf_target}")
@@ -193,6 +264,22 @@ def main() -> None:
         return
 
     configure_device(idf_python, env, args.device)
+    if args.action == "flash-app-system":
+        if not args.port:
+            die("--port is required for action 'flash-app-system'")
+
+        run_idf(idf_python, idf_path, env, args.build_dir, "build", None)
+        run_partial_flash(
+            idf_python=idf_python,
+            idf_path=idf_path,
+            env=env,
+            build_dir=args.build_dir,
+            port=args.port,
+            idf_target=idf_target,
+            artifact_names=("Tactility.bin", "system.bin"),
+        )
+        return
+
     run_idf(idf_python, idf_path, env, args.build_dir, args.action, args.port)
 
 

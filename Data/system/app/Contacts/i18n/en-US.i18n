@@ -1,0 +1,38 @@
+Contacts
+Refresh
+Waiting for Reticulum events
+Manual refresh
+Contacts subscribed to Reticulum
+Reticulum updated
+Reticulum: {}\nContacts: {} | announces: {} | paths: {}
+No contacts observed yet
+no additional detail
+local destination
+provisional local destination
+accepts links
+no links
+{} ({})
+interface unknown
+unknown
+{} via {}
+path-response announce, hops={}
+announce observed, hops={}
+path learned
+path via {}
+, marked unresponsive
+reachable in {} hop(s){}
+{}\n{}\n{}
+Starting
+Ready
+Stopping
+Stopped
+Faulted
+Runtime state: {}
+Interface attached
+Interface detached
+Interface started
+Interface stopped
+Local destination registered
+Announce observed
+Path table changed
+Reticulum error

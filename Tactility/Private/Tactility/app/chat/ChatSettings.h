@@ -15,7 +15,7 @@ constexpr auto* CHAT_SETTINGS_FILE = "/data/settings/chat.properties";
 
 struct ChatSettingsData {
     uint32_t senderId = 0;  // Unique device ID (randomly generated on first launch)
-    std::string nickname = "Device";
+    std::string nickname {};
     std::string chatChannel = "#general";
 };
 

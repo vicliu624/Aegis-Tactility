@@ -5,6 +5,7 @@
 #if defined(CONFIG_SOC_WIFI_SUPPORTED) && !defined(CONFIG_SLAVE_SOC_WIFI_SUPPORTED)
 
 #include <Tactility/app/chat/ChatAppPrivate.h>
+#include <Tactility/app/chat/Localization.h>
 #include <Tactility/app/chat/ChatProtocol.h>
 
 #include <Tactility/app/AppManifest.h>
@@ -162,6 +163,7 @@ void ChatApp::switchChannel(const std::string& chatChannel) {
 extern const AppManifest manifest = {
     .appId = "Chat",
     .appName = "Chat",
+    .resolveLocalizedAppName = &getLocalizedAppName,
     .appIcon = LVGL_ICON_SHARED_FORUM,
     .createApp = create<ChatApp>
 };

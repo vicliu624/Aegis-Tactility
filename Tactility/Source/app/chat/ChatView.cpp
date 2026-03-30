@@ -6,6 +6,7 @@
 
 #include <Tactility/app/chat/ChatView.h>
 #include <Tactility/app/chat/ChatAppPrivate.h>
+#include <Tactility/app/chat/Localization.h>
 #include <Tactility/app/chat/ChatProtocol.h>
 
 #include <Tactility/lvgl/Toolbar.h>
@@ -32,7 +33,7 @@ void ChatView::addMessageToList(lv_obj_t* list, const StoredMessage& msg) {
 void ChatView::updateToolbarTitle() {
     if (!state || !toolbar) return;
     std::string channel = state->getCurrentChannel();
-    std::string title = "Chat: " + channel;
+    std::string title = formatText(i18n::Text::CHAT_TITLE_FMT, channel);
     lvgl::toolbar_set_title(toolbar, title);
 }
 
@@ -47,7 +48,7 @@ void ChatView::createInputBar(lv_obj_t* parent) {
 
     inputField = lv_textarea_create(wrapper);
     lv_obj_set_flex_grow(inputField, 1);
-    lv_textarea_set_placeholder_text(inputField, "Type a message...");
+    lv_textarea_set_placeholder_text(inputField, getTextResources()[i18n::Text::MESSAGE_PLACEHOLDER].c_str());
     lv_textarea_set_one_line(inputField, true);
     lv_textarea_set_max_length(inputField, MAX_MESSAGE_LEN);
 
@@ -57,7 +58,7 @@ void ChatView::createInputBar(lv_obj_t* parent) {
     lv_obj_add_event_cb(sendBtn, onSendClicked, LV_EVENT_CLICKED, this);
 
     auto* btnLabel = lv_label_create(sendBtn);
-    lv_label_set_text(btnLabel, "Send");
+    lv_label_set_text(btnLabel, getTextResources()[i18n::Text::SEND].c_str());
     lv_obj_center(btnLabel);
 }
 
@@ -72,7 +73,8 @@ void ChatView::createSettingsPanel(lv_obj_t* parent) {
 
     // Nickname
     auto* nickLabel = lv_label_create(settingsPanel);
-    lv_label_set_text(nickLabel, "Nickname (max 23):");
+    const auto nicknameLabel = formatText(i18n::Text::NICKNAME_LABEL_FMT, MAX_NICKNAME_LEN);
+    lv_label_set_text(nickLabel, nicknameLabel.c_str());
 
     nicknameInput = lv_textarea_create(settingsPanel);
     lv_obj_set_width(nicknameInput, LV_PCT(100));
@@ -90,12 +92,12 @@ void ChatView::createSettingsPanel(lv_obj_t* parent) {
     auto* saveBtn = lv_button_create(btnRow);
     lv_obj_add_event_cb(saveBtn, onSettingsSave, LV_EVENT_CLICKED, this);
     auto* saveLbl = lv_label_create(saveBtn);
-    lv_label_set_text(saveLbl, "Save");
+    lv_label_set_text(saveLbl, getTextResources()[i18n::Text::SAVE].c_str());
 
     auto* cancelBtn = lv_button_create(btnRow);
     lv_obj_add_event_cb(cancelBtn, onSettingsCancel, LV_EVENT_CLICKED, this);
     auto* cancelLbl = lv_label_create(cancelBtn);
-    lv_label_set_text(cancelLbl, "Cancel");
+    lv_label_set_text(cancelLbl, getTextResources()[i18n::Text::CANCEL].c_str());
 }
 
 void ChatView::createChannelPanel(lv_obj_t* parent) {
@@ -108,7 +110,8 @@ void ChatView::createChannelPanel(lv_obj_t* parent) {
     lv_obj_add_flag(channelPanel, LV_OBJ_FLAG_HIDDEN);
 
     auto* label = lv_label_create(channelPanel);
-    lv_label_set_text(label, "Channel (e.g. #general):");
+    const auto channelLabel = formatText(i18n::Text::CHANNEL_LABEL_FMT, "#general");
+    lv_label_set_text(label, channelLabel.c_str());
 
     channelInput = lv_textarea_create(channelPanel);
     lv_obj_set_width(channelInput, LV_PCT(100));
@@ -125,12 +128,12 @@ void ChatView::createChannelPanel(lv_obj_t* parent) {
     auto* okBtn = lv_button_create(btnRow);
     lv_obj_add_event_cb(okBtn, onChannelSave, LV_EVENT_CLICKED, this);
     auto* okLbl = lv_label_create(okBtn);
-    lv_label_set_text(okLbl, "OK");
+    lv_label_set_text(okLbl, getTextResources()[i18n::Text::OK].c_str());
 
     auto* cancelBtn = lv_button_create(btnRow);
     lv_obj_add_event_cb(cancelBtn, onChannelCancel, LV_EVENT_CLICKED, this);
     auto* cancelLbl = lv_label_create(cancelBtn);
-    lv_label_set_text(cancelLbl, "Cancel");
+    lv_label_set_text(cancelLbl, getTextResources()[i18n::Text::CANCEL].c_str());
 }
 
 void ChatView::init(AppContext& appContext, lv_obj_t* parent) {

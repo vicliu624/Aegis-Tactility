@@ -5,6 +5,7 @@
 #if defined(CONFIG_SOC_WIFI_SUPPORTED) && !defined(CONFIG_SLAVE_SOC_WIFI_SUPPORTED)
 
 #include <Tactility/app/chat/ChatSettings.h>
+#include <Tactility/app/chat/Localization.h>
 #include <Tactility/app/chat/ChatProtocol.h>
 
 #include <Tactility/file/PropertiesFile.h>
@@ -33,7 +34,7 @@ static uint32_t generateSenderId() {
 ChatSettingsData getDefaultSettings() {
     return ChatSettingsData{
         .senderId = 0,
-        .nickname = "Device",
+        .nickname = getDefaultNickname(),
         .chatChannel = "#general"
     };
 }

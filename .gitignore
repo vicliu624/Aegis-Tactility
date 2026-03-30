@@ -1,6 +1,7 @@
 .idea/
 .DS_Store
 
+Buildscripts/__pycache__/
 build/
 build-*/
 buildsim/
