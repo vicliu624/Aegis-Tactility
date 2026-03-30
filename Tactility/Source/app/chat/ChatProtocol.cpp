@@ -5,9 +5,7 @@
 #if defined(CONFIG_SOC_WIFI_SUPPORTED) && !defined(CONFIG_SLAVE_SOC_WIFI_SUPPORTED)
 
 #include <Tactility/app/chat/ChatProtocol.h>
-#include <Tactility/service/espnow/EspNow.h>
 
-#include <algorithm>
 #include <cstring>
 
 namespace tt::app::chat {
@@ -25,17 +23,14 @@ bool serializeTextMessage(uint32_t senderId, uint32_t targetId,
     if (message.size() < MIN_MESSAGE_LEN) {
         return false;
     }
+    if (message.size() > MAX_MESSAGE_LEN) {
+        return false;
+    }
 
     // Calculate payload size: nickname + null + target + null + message
     size_t payloadSize = senderName.size() + 1 + target.size() + 1 + message.size();
 
-    // Check against ESP-NOW limits (guard against underflow if getMaxDataLength < HEADER_SIZE)
-    size_t maxData = service::espnow::getMaxDataLength();
-    if (maxData <= HEADER_SIZE) {
-        return false;
-    }
-    size_t maxPayload = maxData - HEADER_SIZE;
-    if (payloadSize > maxPayload || payloadSize > 255) {
+    if (HEADER_SIZE + payloadSize > MAX_WIRE_SIZE || payloadSize > 255) {
         return false;  // payload_size is uint8_t
     }
 
@@ -148,25 +143,6 @@ bool deserializeMessage(const uint8_t* data, size_t length, ParsedMessage& out) 
     out.message = std::string(messageStart, remaining);
 
     return true;
-}
-
-size_t getMaxMessageLength(size_t nicknameLen, size_t targetLen) {
-    // Guard against underflow if getMaxDataLength < HEADER_SIZE
-    size_t maxData = service::espnow::getMaxDataLength();
-    if (maxData <= HEADER_SIZE) {
-        return 0;
-    }
-    size_t maxPayload = maxData - HEADER_SIZE;
-
-    // Payload: nickname + null + target + null + message
-    size_t overhead = nicknameLen + 1 + targetLen + 1;
-    if (overhead >= maxPayload || overhead > 255) {
-        return 0;
-    }
-    // Cap at 255 since payload_size is uint8_t
-    size_t maxFromEspNow = maxPayload - overhead;
-    size_t maxFromPayloadSize = 255 - overhead;
-    return std::min(maxFromEspNow, maxFromPayloadSize);
 }
 
 } // namespace tt::app::chat

@@ -14,6 +14,10 @@ public:
     std::optional<PacketSummary> summarize(const std::vector<uint8_t>& packet) const;
 
     std::optional<AnnounceInfo> extractAnnounce(const InboundFrame& frame) const;
+
+    std::vector<uint8_t> encodeAppData(const DestinationHash& destination, const std::vector<uint8_t>& payload) const;
+
+    std::optional<AppDataInfo> extractAppData(const InboundFrame& frame) const;
 };
 
 } // namespace tt::service::reticulum

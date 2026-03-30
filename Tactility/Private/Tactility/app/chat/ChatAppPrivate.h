@@ -11,21 +11,24 @@
 #include "ChatSettings.h"
 
 #include <Tactility/app/App.h>
-#include <Tactility/service/espnow/EspNow.h>
+#include <Tactility/PubSub.h>
+#include <Tactility/service/reticulum/Reticulum.h>
 
 namespace tt::app::chat {
 
 class ChatApp final : public App {
 
+    using ReticulumEvent = service::reticulum::ReticulumEvent;
+
     ChatState state;
     ChatView view = ChatView(this, &state);
-    service::espnow::ReceiverSubscription receiveSubscription = -1;
+    PubSub<ReticulumEvent>::SubscriptionHandle reticulumSubscription = nullptr;
     ChatSettingsData settings;
     bool isFirstLaunch = false;
 
-    void onReceive(const esp_now_recv_info_t* receiveInfo, const uint8_t* data, int length);
-    void enableEspNow();
-    void disableEspNow();
+    void ensureReticulumBindings();
+    void onReticulumEvent(const ReticulumEvent& event);
+    void onReceivePayload(const std::vector<uint8_t>& data);
 
 public:
     void onCreate(AppContext& appContext) override;
@@ -33,7 +36,7 @@ public:
     void onShow(AppContext& context, lv_obj_t* parent) override;
 
     void sendMessage(const std::string& text);
-    void applySettings(const std::string& nickname, const std::string& keyHex);
+    void applySettings(const std::string& nickname);
     void switchChannel(const std::string& chatChannel);
 
     const ChatSettingsData& getSettings() const { return settings; }

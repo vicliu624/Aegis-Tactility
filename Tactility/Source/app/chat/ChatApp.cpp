@@ -12,31 +12,34 @@
 #include <Tactility/lvgl/LvglSync.h>
 
 #include <algorithm>
-#include <cctype>
-#include <cstdlib>
 #include <tactility/lvgl_icon_shared.h>
 #include <vector>
 
 namespace tt::app::chat {
 
 static const auto LOGGER = Logger("ChatApp");
-static constexpr uint8_t BROADCAST_ADDRESS[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+static constexpr auto* CHAT_ENDPOINT = "aegis.chat.broadcast";
+static constexpr auto* CHAT_DESTINATION = "aegis.chat";
 
-void ChatApp::enableEspNow() {
-    static uint8_t defaultKey[ESP_NOW_KEY_LEN] = {};
-    auto config = service::espnow::EspNowConfig(
-        settings.hasEncryptionKey ? settings.encryptionKey.data() : defaultKey,
-        service::espnow::Mode::Station,
-        1, // Channel 1 default; actual channel determined by WiFi if connected
-        false,
-        settings.hasEncryptionKey
-    );
-    service::espnow::enable(config);
-}
+void ChatApp::ensureReticulumBindings() {
+    const auto endpoints = service::reticulum::getAppEndpoints();
+    const auto hasEndpoint = std::ranges::any_of(endpoints, [](const auto& endpoint) {
+        return endpoint.name == CHAT_ENDPOINT;
+    });
+    if (!hasEndpoint && !service::reticulum::registerAppEndpoint(CHAT_ENDPOINT)) {
+        LOGGER.warn("Failed to register chat endpoint {}", CHAT_ENDPOINT);
+    }
 
-void ChatApp::disableEspNow() {
-    if (service::espnow::isEnabled()) {
-        service::espnow::disable();
+    const auto destinations = service::reticulum::getLocalDestinations();
+    const auto hasDestination = std::ranges::any_of(destinations, [](const auto& destination) {
+        return destination.name == CHAT_DESTINATION;
+    });
+    if (!hasDestination) {
+        service::reticulum::registerLocalDestination(service::reticulum::LocalDestination {
+            .name = CHAT_DESTINATION,
+            .acceptsLinks = false,
+            .announceEnabled = true
+        });
     }
 }
 
@@ -47,18 +50,22 @@ void ChatApp::onCreate(AppContext& appContext) {
     if (!settings.chatChannel.empty()) {
         state.setCurrentChannel(settings.chatChannel);
     }
-    enableEspNow();
+    ensureReticulumBindings();
 
-    receiveSubscription = service::espnow::subscribeReceiver(
-        [this](const esp_now_recv_info_t* receiveInfo, const uint8_t* data, int length) {
-            onReceive(receiveInfo, data, length);
-        }
-    );
+    if (const auto pubsub = service::reticulum::getPubsub(); pubsub != nullptr) {
+        reticulumSubscription = pubsub->subscribe([this](ReticulumEvent event) {
+            onReticulumEvent(event);
+        });
+    }
 }
 
 void ChatApp::onDestroy(AppContext& appContext) {
-    service::espnow::unsubscribeReceiver(receiveSubscription);
-    disableEspNow();
+    if (reticulumSubscription != nullptr) {
+        if (const auto pubsub = service::reticulum::getPubsub(); pubsub != nullptr) {
+            pubsub->unsubscribe(reticulumSubscription);
+        }
+        reticulumSubscription = nullptr;
+    }
 }
 
 void ChatApp::onShow(AppContext& context, lv_obj_t* parent) {
@@ -68,11 +75,9 @@ void ChatApp::onShow(AppContext& context, lv_obj_t* parent) {
     }
 }
 
-void ChatApp::onReceive(const esp_now_recv_info_t* receiveInfo, const uint8_t* data, int length) {
-    if (length <= 0) return;
-
+void ChatApp::onReceivePayload(const std::vector<uint8_t>& data) {
     ParsedMessage parsed;
-    if (!deserializeMessage(data, static_cast<size_t>(length), parsed)) {
+    if (!deserializeMessage(data.data(), data.size(), parsed)) {
         return;
     }
 
@@ -90,6 +95,18 @@ void ChatApp::onReceive(const esp_now_recv_info_t* receiveInfo, const uint8_t* d
     }
 }
 
+void ChatApp::onReticulumEvent(const ReticulumEvent& event) {
+    if (event.type != service::reticulum::EventType::AppDataReceived || !event.appData.has_value()) {
+        return;
+    }
+
+    if (event.appData->endpoint != CHAT_ENDPOINT) {
+        return;
+    }
+
+    onReceivePayload(event.appData->payload);
+}
+
 void ChatApp::sendMessage(const std::string& text) {
     if (text.empty()) return;
 
@@ -102,8 +119,8 @@ void ChatApp::sendMessage(const std::string& text) {
         return;
     }
 
-    if (!service::espnow::send(BROADCAST_ADDRESS, wireMsg.data(), wireMsg.size())) {
-        LOGGER.error("Failed to send message");
+    if (!service::reticulum::broadcastAppData(CHAT_ENDPOINT, wireMsg)) {
+        LOGGER.error("Failed to broadcast message through Reticulum");
         return;
     }
 
@@ -121,48 +138,12 @@ void ChatApp::sendMessage(const std::string& text) {
     }
 }
 
-void ChatApp::applySettings(const std::string& nickname, const std::string& keyHex) {
-    bool needRestart = false;
-
+void ChatApp::applySettings(const std::string& nickname) {
     // Trim nickname to protocol limit
     settings.nickname = nickname.substr(0, MAX_NICKNAME_LEN);
 
-    // Parse hex key
-    if (keyHex.size() == ESP_NOW_KEY_LEN * 2) {
-        bool validHex = std::all_of(keyHex.begin(), keyHex.end(), [](unsigned char c) { return std::isxdigit(c); });
-        if (validHex) {
-            uint8_t newKey[ESP_NOW_KEY_LEN];
-            for (int i = 0; i < ESP_NOW_KEY_LEN; i++) {
-                char hex[3] = { keyHex[i * 2], keyHex[i * 2 + 1], 0 };
-                newKey[i] = static_cast<uint8_t>(strtoul(hex, nullptr, 16));
-            }
-            // Restart if key changed OR if encryption is being enabled
-            bool wasEnabled = settings.hasEncryptionKey;
-            if (!wasEnabled || !std::equal(newKey, newKey + ESP_NOW_KEY_LEN, settings.encryptionKey.begin())) {
-                std::copy(newKey, newKey + ESP_NOW_KEY_LEN, settings.encryptionKey.begin());
-                needRestart = true;
-            }
-            settings.hasEncryptionKey = true;
-        } else {
-            LOGGER.warn("Invalid hex characters in encryption key");
-        }
-    } else if (keyHex.empty()) {
-        if (settings.hasEncryptionKey) {
-            settings.encryptionKey.fill(0);
-            settings.hasEncryptionKey = false;
-            needRestart = true;
-        }
-    } else {
-        LOGGER.warn("Key must be exactly {} hex characters, got {}", ESP_NOW_KEY_LEN * 2, keyHex.size());
-    }
-
     state.setLocalNickname(settings.nickname);
     saveSettings(settings);
-
-    if (needRestart) {
-        disableEspNow();
-        enableEspNow();
-    }
 }
 
 void ChatApp::switchChannel(const std::string& chatChannel) {

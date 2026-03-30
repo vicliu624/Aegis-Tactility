@@ -10,7 +10,6 @@
 
 #include <Tactility/lvgl/Toolbar.h>
 
-#include <cstdio>
 #include <cstring>
 
 namespace tt::app::chat {
@@ -79,16 +78,6 @@ void ChatView::createSettingsPanel(lv_obj_t* parent) {
     lv_obj_set_width(nicknameInput, LV_PCT(100));
     lv_textarea_set_one_line(nicknameInput, true);
     lv_textarea_set_max_length(nicknameInput, MAX_NICKNAME_LEN);
-
-    // Encryption key
-    auto* keyLabel = lv_label_create(settingsPanel);
-    lv_label_set_text(keyLabel, "Key (32 hex chars):");
-
-    keyInput = lv_textarea_create(settingsPanel);
-    lv_obj_set_width(keyInput, LV_PCT(100));
-    lv_textarea_set_one_line(keyInput, true);
-    lv_textarea_set_max_length(keyInput, ESP_NOW_KEY_LEN * 2);
-    lv_textarea_set_placeholder_text(keyInput, "empty = all zeros");
 
     // Buttons
     auto* btnRow = lv_obj_create(settingsPanel);
@@ -201,16 +190,6 @@ void ChatView::showSettings(const ChatSettingsData& current) {
 
     lv_textarea_set_text(nicknameInput, current.nickname.c_str());
 
-    if (current.hasEncryptionKey) {
-        char hexStr[ESP_NOW_KEY_LEN * 2 + 1] = {};
-        for (size_t i = 0; i < ESP_NOW_KEY_LEN; i++) {
-            snprintf(hexStr + i * 2, 3, "%02x", current.encryptionKey[i]);
-        }
-        lv_textarea_set_text(keyInput, hexStr);
-    } else {
-        lv_textarea_set_text(keyInput, "");
-    }
-
     lv_obj_add_flag(msgList, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(inputWrapper, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(settingsPanel, LV_OBJ_FLAG_HIDDEN);
@@ -259,13 +238,9 @@ void ChatView::onSettingsSave(lv_event_t* e) {
     auto* self = static_cast<ChatView*>(lv_event_get_user_data(e));
 
     auto* nickname = lv_textarea_get_text(self->nicknameInput);
-    auto* keyHex = lv_textarea_get_text(self->keyInput);
 
     if (nickname && strlen(nickname) > 0) {
-        self->app->applySettings(
-            std::string(nickname),
-            keyHex ? std::string(keyHex) : std::string()
-        );
+        self->app->applySettings(std::string(nickname));
     }
     self->hideSettings();
 }

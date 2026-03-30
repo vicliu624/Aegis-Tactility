@@ -11,8 +11,10 @@ namespace {
 constexpr uint8_t FLAG_HEADER_TYPE = 0x40;
 constexpr uint8_t FLAG_CONTEXT = 0x20;
 constexpr uint8_t MASK_PACKET_TYPE = 0x03;
+constexpr uint8_t PACKET_TYPE_DATA = 0x00;
 constexpr uint8_t PACKET_TYPE_ANNOUNCE = 0x01;
 constexpr uint8_t CONTEXT_PATH_RESPONSE = 0x0B;
+constexpr uint8_t CONTEXT_APP_DATA = 0xF0;
 constexpr size_t HASH_LENGTH = DESTINATION_HASH_LENGTH;
 constexpr size_t ANNOUNCE_IDENTITY_PUBLIC_KEY_LENGTH = 64;
 constexpr size_t ANNOUNCE_NAME_HASH_LENGTH = 10;
@@ -39,6 +41,17 @@ std::optional<PacketSummary> PacketCodec::summarize(const std::vector<uint8_t>& 
         summary.payloadSize = packet.size() > 2 ? packet.size() - 2 : 0;
     }
     return summary;
+}
+
+std::vector<uint8_t> PacketCodec::encodeAppData(const DestinationHash& destination, const std::vector<uint8_t>& payload) const {
+    std::vector<uint8_t> packet;
+    packet.reserve(2 + HASH_LENGTH + 1 + payload.size());
+    packet.push_back(FLAG_CONTEXT | PACKET_TYPE_DATA);
+    packet.push_back(0);
+    packet.insert(packet.end(), destination.bytes.begin(), destination.bytes.end());
+    packet.push_back(CONTEXT_APP_DATA);
+    packet.insert(packet.end(), payload.begin(), payload.end());
+    return packet;
 }
 
 std::optional<AnnounceInfo> PacketCodec::extractAnnounce(const InboundFrame& frame) const {
@@ -91,6 +104,38 @@ std::optional<AnnounceInfo> PacketCodec::extractAnnounce(const InboundFrame& fra
     }
 
     return announce;
+}
+
+std::optional<AppDataInfo> PacketCodec::extractAppData(const InboundFrame& frame) const {
+    const auto& packet = frame.payload;
+    if (packet.size() < 2 + HASH_LENGTH + 1 + 1) {
+        return std::nullopt;
+    }
+
+    const auto flags = packet[0];
+    if ((flags & MASK_PACKET_TYPE) != PACKET_TYPE_DATA || (flags & FLAG_HEADER_TYPE) != 0) {
+        return std::nullopt;
+    }
+
+    const size_t contextOffset = 2 + HASH_LENGTH;
+    if (packet[contextOffset] != CONTEXT_APP_DATA) {
+        return std::nullopt;
+    }
+
+    AppDataInfo appData;
+    std::copy_n(packet.begin() + 2, HASH_LENGTH, appData.destination.bytes.begin());
+    appData.interfaceId = frame.interfaceId;
+    appData.interfaceKind = frame.interfaceKind;
+    appData.nextHop = frame.nextHop;
+    appData.hops = packet[1];
+    appData.provisional = true;
+    appData.payload.assign(packet.begin() + contextOffset + 1, packet.end());
+
+    if (appData.payload.empty()) {
+        return std::nullopt;
+    }
+
+    return appData;
 }
 
 } // namespace tt::service::reticulum

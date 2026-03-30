@@ -11,7 +11,6 @@
 
 #include <Tactility/app/AppContext.h>
 
-#include <esp_now.h>
 #include <lvgl.h>
 
 namespace tt::app::chat {
@@ -31,7 +30,6 @@ class ChatView {
     // Settings panel widgets
     lv_obj_t* settingsPanel = nullptr;
     lv_obj_t* nicknameInput = nullptr;
-    lv_obj_t* keyInput = nullptr;
 
     // Channel selector panel widgets
     lv_obj_t* channelPanel = nullptr;

@@ -40,8 +40,9 @@ static_assert(sizeof(MessageHeader) == 16, "MessageHeader must be 16 bytes");
 
 // Size limits
 constexpr size_t HEADER_SIZE = sizeof(MessageHeader);
-constexpr size_t MAX_PAYLOAD_V1 = 250 - HEADER_SIZE;   // 234 bytes for ESP-NOW v1
-constexpr size_t MAX_PAYLOAD_V2 = 1470 - HEADER_SIZE;  // 1454 bytes for ESP-NOW v2
+// Keep the chat payload comfortably below the current Reticulum-over-ESP-NOW
+// provisional datagram size while leaving space for the app wrapper header.
+constexpr size_t MAX_WIRE_SIZE = 231;
 
 // Nickname constraints
 constexpr size_t MIN_NICKNAME_LEN = 2;    // Single-letter names not allowed
@@ -53,10 +54,7 @@ constexpr size_t MAX_TARGET_LEN = 23;     // Max target/channel length (excludin
 
 // Message constraints
 constexpr size_t MIN_MESSAGE_LEN = 1;     // At least 1 char (e.g. "?")
-
-// Max message length: 255 (uint8_t payload_size) - nickname - null - target - null
-// Using max lengths: 255 - 23 - 1 - 23 - 1 = 207, rounded down for safety
-constexpr size_t MAX_MESSAGE_LEN = 200;
+constexpr size_t MAX_MESSAGE_LEN = 160;
 
 // Parsed message for application use
 struct ParsedMessage {
@@ -87,10 +85,6 @@ bool serializeTextMessage(uint32_t senderId, uint32_t targetId,
  * @return true if valid (correct magic, version, and format)
  */
 bool deserializeMessage(const uint8_t* data, size_t length, ParsedMessage& out);
-
-/** Get maximum message length for current ESP-NOW version.
- * Accounts for header + nickname + target overhead. */
-size_t getMaxMessageLength(size_t nicknameLen, size_t targetLen);
 
 } // namespace tt::app::chat
 

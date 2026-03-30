@@ -108,6 +108,21 @@ void ReticulumService::publishPathTableChanged(const PathEntry& entry, std::stri
     });
 }
 
+bool ReticulumService::broadcastPacket(const std::vector<uint8_t>& packet) {
+    bool delivered = false;
+    for (const auto& descriptor : interfaceManager->getInterfaces()) {
+        if (!descriptor.started || !hasCapability(descriptor.capabilities, InterfaceCapability::Broadcast)) {
+            continue;
+        }
+
+        delivered = interfaceManager->sendFrame(descriptor.id, InterfaceFrame {
+            .payload = packet,
+            .broadcast = true
+        }) || delivered;
+    }
+    return delivered;
+}
+
 bool ReticulumService::onStart(ServiceContext& serviceContext) {
     LOGGER.info("Starting Reticulum service milestone shell");
 
@@ -264,6 +279,37 @@ std::vector<RegisteredDestination> ReticulumService::getLocalDestinations() {
     return destinationRegistry->getLocalDestinations();
 }
 
+bool ReticulumService::registerAppEndpoint(const std::string& endpointName) {
+    if (endpointName.empty()) {
+        return false;
+    }
+
+    const auto added = destinationRegistry->registerAppEndpoint(endpointName);
+    if (!added && !destinationRegistry->findAppEndpoint(endpointName).has_value()) {
+        return false;
+    }
+
+    const auto endpoint = destinationRegistry->findAppEndpoint(endpointName);
+    if (!endpoint.has_value()) {
+        return false;
+    }
+
+    publishEvent(ReticulumEvent {
+        .type = EventType::LocalDestinationRegistered,
+        .runtimeState = getRuntimeState(),
+        .destination = endpoint->hash,
+        .detail = added
+            ? std::format("Registered app endpoint {} ({})", endpoint->name, toHex(endpoint->hash))
+            : std::format("App endpoint {} already registered", endpoint->name)
+    });
+
+    return true;
+}
+
+std::vector<AppEndpoint> ReticulumService::getAppEndpoints() {
+    return destinationRegistry->getAppEndpoints();
+}
+
 std::vector<AnnounceInfo> ReticulumService::getAnnounces() {
     auto lock = mutex.asScopedLock();
     lock.lock();
@@ -280,6 +326,20 @@ std::vector<LinkInfo> ReticulumService::getLinks() {
 
 std::vector<ResourceInfo> ReticulumService::getResources() {
     return resourceManager->getResources();
+}
+
+bool ReticulumService::broadcastAppData(const std::string& endpointName, const std::vector<uint8_t>& payload) {
+    if (payload.empty()) {
+        return false;
+    }
+
+    const auto endpoint = destinationRegistry->findAppEndpoint(endpointName);
+    if (!endpoint.has_value()) {
+        LOGGER.warn("Unknown app endpoint {}", endpointName);
+        return false;
+    }
+
+    return broadcastPacket(packetCodec->encodeAppData(endpoint->hash, payload));
 }
 
 bool ReticulumService::sendFrame(const std::string& interfaceId, const InterfaceFrame& frame) {
@@ -344,6 +404,24 @@ void ReticulumService::onInboundFrame(InboundFrame frame) {
                     ? std::format("Refreshed path for {} via {}", toHex(entry.destination), entry.interfaceId)
                     : std::format("Installed path for {} via {}", toHex(entry.destination), entry.interfaceId)
                 );
+            }
+        }
+
+        const auto appData = packetCodec->extractAppData(frame);
+        if (appData.has_value()) {
+            const auto endpoint = destinationRegistry->findAppEndpoint(appData->destination);
+            if (endpoint.has_value()) {
+                auto delivered = *appData;
+                delivered.endpoint = endpoint->name;
+
+                publishEvent(ReticulumEvent {
+                    .type = EventType::AppDataReceived,
+                    .runtimeState = getRuntimeState(),
+                    .interface = toDescriptor(frame),
+                    .appData = delivered,
+                    .destination = delivered.destination,
+                    .detail = std::format("Received {} app bytes for {}", delivered.payload.size(), delivered.endpoint)
+                });
             }
         }
     });
