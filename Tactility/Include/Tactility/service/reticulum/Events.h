@@ -19,6 +19,8 @@ enum class EventType {
     PacketDecoded,
     PathTableChanged,
     LinkTableChanged,
+    RequestReceived,
+    ResponseReceived,
     ResourceTableChanged,
     Error
 };
@@ -31,6 +33,8 @@ struct ReticulumEvent {
     std::optional<AnnounceInfo> announce {};
     std::optional<PathEntry> path {};
     std::optional<LinkInfo> link {};
+    std::optional<RequestInfo> request {};
+    std::optional<ResponseInfo> response {};
     std::optional<ResourceInfo> resource {};
     std::optional<DestinationHash> destination {};
     std::string detail {};

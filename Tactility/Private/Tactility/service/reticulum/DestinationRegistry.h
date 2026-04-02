@@ -32,6 +32,11 @@ public:
         const IdentityStore::LocalIdentity& localIdentity
     );
 
+    bool updateLocalDestinationAppData(
+        const DestinationHash& destinationHash,
+        const std::vector<uint8_t>& appData
+    );
+
     std::vector<RegisteredDestination> getLocalDestinations() const;
 
     std::optional<RegisteredDestination> findLocalDestination(const DestinationHash& destinationHash) const;

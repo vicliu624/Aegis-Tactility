@@ -11,8 +11,11 @@
 #include <Tactility/Logger.h>
 #include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/service/lxmf/Lxmf.h>
+#include <Tactility/settings/ChatSettings.h>
 
 #include <tactility/lvgl_icon_shared.h>
+
+#include <algorithm>
 
 namespace tt::app::chat {
 
@@ -40,12 +43,34 @@ static const auto LOGGER = Logger("ChatApp");
 
 void ChatApp::refreshStateFromServices() {
     const auto screenMode = state.getScreenMode();
-    state.setConversations(service::lxmf::getConversations());
-    state.setPeers(service::lxmf::getPeers());
+    auto settingsSnapshot = settings::chat::loadOrGetDefault();
+    if (settingsSnapshot.nickname.empty()) {
+        settingsSnapshot.nickname = getDefaultNickname();
+    }
+    state.setLocalNickname(settingsSnapshot.nickname);
+
+    const auto conversations = service::lxmf::getConversations();
+    const auto peers = service::lxmf::getPeers();
+    state.setConversations(conversations);
+    state.setPeers(peers);
 
     if (screenMode == ScreenMode::Thread) {
         service::reticulum::DestinationHash peerDestination;
         if (state.getActivePeer(peerDestination)) {
+            const auto conversation = std::find_if(conversations.begin(), conversations.end(), [&](const auto& item) {
+                return item.peerDestination == peerDestination;
+            });
+            if (conversation != conversations.end()) {
+                state.setActiveTitle(resolveConversationTitle(*conversation));
+            } else {
+                const auto peer = std::find_if(peers.begin(), peers.end(), [&](const auto& item) {
+                    return item.destination == peerDestination;
+                });
+                if (peer != peers.end()) {
+                    state.setActiveTitle(resolvePeerTitle(*peer));
+                }
+            }
+
             state.setMessages(service::lxmf::getMessages(peerDestination));
             service::lxmf::markConversationRead(peerDestination);
         }

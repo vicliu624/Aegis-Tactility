@@ -64,6 +64,7 @@ public:
     std::vector<service::lxmf::MessageInfo> getMessages() const;
 
     bool getActivePeer(service::reticulum::DestinationHash& outDestination) const;
+    void setActiveTitle(const std::string& title);
     std::string getActiveTitle() const;
 };
 

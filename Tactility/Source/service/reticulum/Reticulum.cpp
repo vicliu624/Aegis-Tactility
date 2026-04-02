@@ -65,6 +65,16 @@ std::vector<RegisteredDestination> getLocalDestinations() {
     return service != nullptr ? service->getLocalDestinations() : std::vector<RegisteredDestination> {};
 }
 
+bool updateLocalDestinationAppData(const DestinationHash& destinationHash, const std::vector<uint8_t>& appData) {
+    const auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Service not running");
+        return false;
+    }
+
+    return service->updateLocalDestinationAppData(destinationHash, appData);
+}
+
 bool announceLocalDestination(const DestinationHash& destinationHash) {
     auto service = findService();
     if (service == nullptr) {
@@ -101,6 +111,20 @@ bool sendLinkData(const DestinationHash& linkId, uint8_t context, const std::vec
     return service->sendLinkData(linkId, context, plaintext);
 }
 
+bool sendLinkResource(
+    const DestinationHash& linkId,
+    const std::vector<uint8_t>& plaintext,
+    ResourceInfo* outResource
+) {
+    const auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Service not running");
+        return false;
+    }
+
+    return service->sendLinkResource(linkId, plaintext, outResource);
+}
+
 bool identifyLink(const DestinationHash& linkId) {
     auto service = findService();
     if (service == nullptr) {
@@ -117,6 +141,68 @@ bool closeLink(const DestinationHash& linkId) {
         return false;
     }
     return service->closeLink(linkId);
+}
+
+bool signLocalIdentity(const std::vector<uint8_t>& payload, SignatureBytes& signature) {
+    const auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Reticulum service unavailable while signing local identity payload");
+        return false;
+    }
+
+    return service->signLocalIdentity(payload, signature);
+}
+
+std::optional<IdentityPublicKeyBytes> recallIdentityPublicKey(const DestinationHash& destinationHash) {
+    if (const auto service = findService(); service != nullptr) {
+        return service->recallIdentityPublicKey(destinationHash);
+    }
+
+    return std::nullopt;
+}
+
+bool registerRequestHandler(const DestinationHash& localDestination, const std::string& path, RequestHandler handler) {
+    const auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Reticulum service unavailable while registering request handler {}", path);
+        return false;
+    }
+
+    return service->registerRequestHandler(localDestination, path, std::move(handler));
+}
+
+bool registerLinkHandler(const DestinationHash& localDestination, LinkMessageHandler handler) {
+    const auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Reticulum service unavailable while registering link handler");
+        return false;
+    }
+
+    return service->registerLinkHandler(localDestination, std::move(handler));
+}
+
+bool sendRequest(
+    const DestinationHash& linkId,
+    const DestinationHash& localDestination,
+    const std::string& path,
+    const std::vector<uint8_t>& requestData,
+    DestinationHash& outRequestId
+) {
+    const auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Reticulum service unavailable while sending request {}", path);
+        return false;
+    }
+
+    return service->sendRequest(linkId, localDestination, path, requestData, outRequestId);
+}
+
+std::vector<RequestInfo> getRequests() {
+    if (const auto service = findService(); service != nullptr) {
+        return service->getRequests();
+    }
+
+    return {};
 }
 
 std::vector<AnnounceInfo> getAnnounces() {

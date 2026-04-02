@@ -28,6 +28,8 @@ class LinkManager final {
         Curve25519PublicKeyBytes localLinkPublicKey {};
         Ed25519PrivateKeyBytes localLinkSignaturePrivateKey {};
         Ed25519PublicKeyBytes localLinkSignaturePublicKey {};
+        Ed25519PrivateKeyBytes localIdentitySigningPrivateKey {};
+        bool useIdentitySigningForProof = false;
         Curve25519PublicKeyBytes peerLinkPublicKey {};
         Ed25519PublicKeyBytes peerLinkSignaturePublicKey {};
         std::array<uint8_t, 64> derivedKey {};
@@ -46,6 +48,8 @@ public:
     std::vector<LinkInfo> getLinks() const;
 
     std::optional<LinkInfo> getLink(const DestinationHash& linkId) const;
+
+    std::optional<DestinationHash> getLocalDestination(const DestinationHash& linkId) const;
 
     bool beginInitiatorLink(
         const DestinationHash& peerDestination,
@@ -79,6 +83,30 @@ public:
         const std::vector<uint8_t>& plaintext,
         const PacketCodec& codec,
         std::vector<uint8_t>& outPacket
+    );
+
+    bool encryptResourceData(
+        const DestinationHash& linkId,
+        const std::vector<uint8_t>& plaintext,
+        std::vector<uint8_t>& ciphertext
+    );
+
+    bool decryptResourceData(
+        const DestinationHash& linkId,
+        const std::vector<uint8_t>& ciphertext,
+        std::vector<uint8_t>& plaintext
+    );
+
+    bool signLinkProof(
+        const DestinationHash& linkId,
+        const FullHashBytes& packetHash,
+        SignatureBytes& signature
+    );
+
+    bool validateLinkProof(
+        const DestinationHash& linkId,
+        const FullHashBytes& packetHash,
+        const SignatureBytes& signature
     );
 
     bool removeLink(const DestinationHash& linkId);

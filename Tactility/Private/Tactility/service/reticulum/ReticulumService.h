@@ -7,7 +7,10 @@
 #include <Tactility/service/ServicePaths.h>
 #include <Tactility/service/reticulum/Events.h>
 #include <Tactility/service/reticulum/Interface.h>
+#include <Tactility/service/reticulum/Reticulum.h>
+#include <Tactility/service/reticulum/ResourceManager.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,7 +22,6 @@ class IdentityStore;
 class InterfaceManager;
 class LinkManager;
 class PacketCodec;
-class ResourceManager;
 class TransportCore;
 
 class ReticulumService final : public Service {
@@ -31,6 +33,22 @@ class ReticulumService final : public Service {
     std::unique_ptr<DispatcherThread> dispatcher = std::make_unique<DispatcherThread>("reticulum_dispatcher", 6144);
     std::vector<AnnounceInfo> observedAnnounces {};
     std::vector<FullHashBytes> seenPathRequestKeys {};
+    std::vector<RequestInfo> requests {};
+
+    struct RequestHandlerRecord {
+        DestinationHash localDestination {};
+        std::string path {};
+        RequestHandler handler {};
+    };
+
+    std::vector<RequestHandlerRecord> requestHandlers {};
+
+    struct LinkHandlerRecord {
+        DestinationHash localDestination {};
+        LinkMessageHandler handler {};
+    };
+
+    std::vector<LinkHandlerRecord> linkHandlers {};
 
     std::unique_ptr<IdentityStore> identityStore;
     std::unique_ptr<DestinationRegistry> destinationRegistry;
@@ -50,9 +68,28 @@ class ReticulumService final : public Service {
 
     void publishLinkTableChanged(const LinkInfo& entry, std::string detail);
 
+    void publishResourceTableChanged(const ResourceInfo& entry, std::string detail);
+
     bool broadcastPacket(const std::vector<uint8_t>& packet);
 
     bool sendPacketOnInterface(const std::string& interfaceId, const std::vector<uint8_t>& packet);
+
+    bool sendLinkPacket(
+        const DestinationHash& linkId,
+        PacketType packetType,
+        uint8_t context,
+        const std::vector<uint8_t>& payload
+    );
+
+    bool dispatchResourceActions(const DestinationHash& linkId, const std::vector<ResourceManager::ResourceAction>& actions);
+
+    void dispatchLinkMessage(
+        const DestinationHash& linkId,
+        uint8_t context,
+        const std::vector<uint8_t>& payload,
+        bool viaResource,
+        const std::optional<ResourceInfo>& resource
+    );
 
     bool announceDestination(const RegisteredDestination& destination, bool pathResponse = false, const std::string& interfaceId = {});
 
@@ -77,6 +114,8 @@ public:
 
     std::vector<RegisteredDestination> getLocalDestinations();
 
+    bool updateLocalDestinationAppData(const DestinationHash& destinationHash, const std::vector<uint8_t>& appData);
+
     bool announceLocalDestination(const DestinationHash& destinationHash);
 
     bool requestPath(const DestinationHash& destinationHash, const std::vector<uint8_t>& tag = {});
@@ -85,9 +124,33 @@ public:
 
     bool sendLinkData(const DestinationHash& linkId, uint8_t context, const std::vector<uint8_t>& plaintext);
 
+    bool sendLinkResource(
+        const DestinationHash& linkId,
+        const std::vector<uint8_t>& plaintext,
+        ResourceInfo* outResource = nullptr
+    );
+
     bool identifyLink(const DestinationHash& linkId);
 
     bool closeLink(const DestinationHash& linkId);
+
+    bool signLocalIdentity(const std::vector<uint8_t>& payload, SignatureBytes& signature);
+
+    std::optional<IdentityPublicKeyBytes> recallIdentityPublicKey(const DestinationHash& destinationHash) const;
+
+    bool registerRequestHandler(const DestinationHash& localDestination, const std::string& path, RequestHandler handler);
+
+    bool registerLinkHandler(const DestinationHash& localDestination, LinkMessageHandler handler);
+
+    bool sendRequest(
+        const DestinationHash& linkId,
+        const DestinationHash& localDestination,
+        const std::string& path,
+        const std::vector<uint8_t>& requestData,
+        DestinationHash& outRequestId
+    );
+
+    std::vector<RequestInfo> getRequests();
 
     std::vector<AnnounceInfo> getAnnounces();
 

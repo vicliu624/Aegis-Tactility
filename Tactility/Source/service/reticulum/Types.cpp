@@ -103,6 +103,22 @@ const char* resourceStateToString(ResourceState state) {
     return "?";
 }
 
+const char* requestStateToString(RequestState state) {
+    switch (state) {
+        case RequestState::None:
+            return "None";
+        case RequestState::Pending:
+            return "Pending";
+        case RequestState::AwaitingResponse:
+            return "AwaitingResponse";
+        case RequestState::Complete:
+            return "Complete";
+        case RequestState::Failed:
+            return "Failed";
+    }
+    return "?";
+}
+
 const char* headerTypeToString(HeaderType type) {
     switch (type) {
         case HeaderType::Header1:

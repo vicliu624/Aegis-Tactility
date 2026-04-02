@@ -43,6 +43,16 @@ std::vector<MessageInfo> getMessages(const reticulum::DestinationHash& peerDesti
     return service != nullptr ? service->getMessages(peerDestination) : std::vector<MessageInfo> {};
 }
 
+bool refreshLocalPeerProfile() {
+    const auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Service not running");
+        return false;
+    }
+
+    return service->refreshLocalPeerProfile();
+}
+
 bool ensureConversation(
     const reticulum::DestinationHash& peerDestination,
     const std::string& title,

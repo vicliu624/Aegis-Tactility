@@ -12,6 +12,7 @@
 #include <Tactility/app/chat/Localization.h>
 #include <Tactility/app/chatprofile/TextResources.h>
 #include <Tactility/lvgl/Toolbar.h>
+#include <Tactility/service/lxmf/Lxmf.h>
 #include <Tactility/settings/ChatSettings.h>
 #include <Tactility/settings/Language.h>
 
@@ -81,6 +82,8 @@ class ChatProfileApp final : public App {
             );
             return;
         }
+
+        service::lxmf::refreshLocalPeerProfile();
 
         alertdialog::start(
             getTextResources()[i18n::Text::APP_NAME],

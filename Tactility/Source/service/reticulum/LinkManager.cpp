@@ -101,6 +101,20 @@ std::optional<LinkInfo> LinkManager::getLink(const DestinationHash& linkId) cons
     return std::nullopt;
 }
 
+std::optional<DestinationHash> LinkManager::getLocalDestination(const DestinationHash& linkId) const {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+
+    const auto iterator = std::find_if(links.begin(), links.end(), [&linkId](const auto& record) {
+        return record.info.linkId == linkId;
+    });
+    if (iterator == links.end() || iterator->localDestination.empty()) {
+        return std::nullopt;
+    }
+
+    return iterator->localDestination;
+}
+
 bool LinkManager::beginInitiatorLink(
     const DestinationHash& peerDestination,
     const DestinationHash& peerIdentityHash,
@@ -122,6 +136,7 @@ bool LinkManager::beginInitiatorLink(
     record.peerIdentityPublicKey = peerIdentityPublicKey;
     record.peerIdentityKnown = true;
     record.requestTick = kernel::getTicks();
+    record.useIdentitySigningForProof = false;
 
     if (!crypto::generateX25519KeyPair(record.localLinkPrivateKey, record.localLinkPublicKey) ||
         !crypto::generateEd25519KeyPair(record.localLinkSignaturePrivateKey, record.localLinkSignaturePublicKey)) {
@@ -165,6 +180,8 @@ std::optional<std::vector<uint8_t>> LinkManager::acceptLinkRequest(
     record.localDestination = localDestination.hash;
     record.peerLinkPublicKey = request.initiatorLinkPublic;
     record.peerLinkSignaturePublicKey = request.initiatorLinkSignaturePublic;
+    record.useIdentitySigningForProof = true;
+    record.localIdentitySigningPrivateKey = localIdentity.signingPrivateKey;
 
     if (!crypto::generateX25519KeyPair(record.localLinkPrivateKey, record.localLinkPublicKey) ||
         !deriveLinkKey(record.info.linkId, record.localLinkPrivateKey, request.initiatorLinkPublic, record.derivedKey)) {
@@ -232,6 +249,7 @@ std::optional<std::vector<uint8_t>> LinkManager::acceptLinkProof(
             std::copy_n(publicKey.begin() + CURVE25519_KEY_LENGTH, output.size(), output.begin());
             return output;
         }(record.peerIdentityPublicKey);
+        record.peerLinkSignaturePublicKey = peerSigningPublicKey;
 
         std::vector<uint8_t> transcript;
         transcript.reserve(proof.linkId.bytes.size() + proof.responderLinkPublic.size() + peerSigningPublicKey.size() + (proof.signalling.has_value() ? proof.signalling->size() : 0));
@@ -377,6 +395,84 @@ bool LinkManager::encodeLinkData(
         .destination = linkId
     }, payload);
     return !outPacket.empty();
+}
+
+bool LinkManager::encryptResourceData(
+    const DestinationHash& linkId,
+    const std::vector<uint8_t>& plaintext,
+    std::vector<uint8_t>& ciphertext
+) {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+
+    const auto iterator = std::find_if(links.begin(), links.end(), [&linkId](const auto& record) {
+        return record.info.linkId == linkId;
+    });
+    if (iterator == links.end() || iterator->info.state == LinkState::Closed) {
+        return false;
+    }
+
+    iterator->info.lastActivityTick = kernel::getTicks();
+    return crypto::tokenEncrypt(iterator->derivedKey, plaintext, ciphertext);
+}
+
+bool LinkManager::decryptResourceData(
+    const DestinationHash& linkId,
+    const std::vector<uint8_t>& ciphertext,
+    std::vector<uint8_t>& plaintext
+) {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+
+    const auto iterator = std::find_if(links.begin(), links.end(), [&linkId](const auto& record) {
+        return record.info.linkId == linkId;
+    });
+    if (iterator == links.end() || iterator->info.state == LinkState::Closed) {
+        return false;
+    }
+
+    iterator->info.lastActivityTick = kernel::getTicks();
+    return crypto::tokenDecrypt(iterator->derivedKey, ciphertext, plaintext);
+}
+
+bool LinkManager::signLinkProof(
+    const DestinationHash& linkId,
+    const FullHashBytes& packetHash,
+    SignatureBytes& signature
+) {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+
+    const auto iterator = std::find_if(links.begin(), links.end(), [&linkId](const auto& record) {
+        return record.info.linkId == linkId;
+    });
+    if (iterator == links.end() || iterator->info.state == LinkState::Closed) {
+        return false;
+    }
+
+    const auto& record = *iterator;
+    const auto& signingKey = record.useIdentitySigningForProof
+        ? record.localIdentitySigningPrivateKey
+        : record.localLinkSignaturePrivateKey;
+    return crypto::ed25519Sign(signingKey, packetHash.data(), packetHash.size(), signature);
+}
+
+bool LinkManager::validateLinkProof(
+    const DestinationHash& linkId,
+    const FullHashBytes& packetHash,
+    const SignatureBytes& signature
+) {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+
+    const auto iterator = std::find_if(links.begin(), links.end(), [&linkId](const auto& record) {
+        return record.info.linkId == linkId;
+    });
+    if (iterator == links.end() || iterator->info.state == LinkState::Closed) {
+        return false;
+    }
+
+    return crypto::ed25519Verify(iterator->peerLinkSignaturePublicKey, packetHash.data(), packetHash.size(), signature);
 }
 
 bool LinkManager::removeLink(const DestinationHash& linkId) {

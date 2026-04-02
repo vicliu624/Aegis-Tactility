@@ -113,6 +113,14 @@ enum class ResourceState {
     Rejected
 };
 
+enum class RequestState {
+    None,
+    Pending,
+    AwaitingResponse,
+    Complete,
+    Failed
+};
+
 enum class InterfaceCapability : uint32_t {
     None = 0,
     Broadcast = 1U << 0,
@@ -258,6 +266,31 @@ struct ResourceInfo {
     ResourceState state = ResourceState::None;
     size_t transferSize = 0;
     size_t totalSize = 0;
+    uint16_t totalParts = 0;
+    uint16_t receivedParts = 0;
+    bool incoming = false;
+    bool carriesRequest = false;
+    bool carriesResponse = false;
+    std::optional<DestinationHash> requestId {};
+};
+
+struct RequestInfo {
+    DestinationHash requestId {};
+    DestinationHash linkId {};
+    DestinationHash localDestination {};
+    std::string path {};
+    RequestState state = RequestState::None;
+    uint32_t requestedTick = 0;
+    bool incoming = false;
+    bool viaResource = false;
+};
+
+struct ResponseInfo {
+    DestinationHash requestId {};
+    DestinationHash linkId {};
+    uint32_t receivedTick = 0;
+    bool viaResource = false;
+    std::vector<uint8_t> payload {};
 };
 
 struct AnnounceInfo {
@@ -336,6 +369,7 @@ const char* runtimeStateToString(RuntimeState state);
 const char* interfaceKindToString(InterfaceKind kind);
 const char* linkStateToString(LinkState state);
 const char* resourceStateToString(ResourceState state);
+const char* requestStateToString(RequestState state);
 const char* headerTypeToString(HeaderType type);
 const char* transportTypeToString(TransportType type);
 const char* packetTypeToString(PacketType type);

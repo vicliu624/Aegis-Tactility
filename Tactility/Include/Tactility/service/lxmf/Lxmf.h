@@ -26,6 +26,8 @@ std::vector<ConversationInfo> getConversations();
 
 std::vector<MessageInfo> getMessages(const reticulum::DestinationHash& peerDestination);
 
+bool refreshLocalPeerProfile();
+
 bool ensureConversation(
     const reticulum::DestinationHash& peerDestination,
     const std::string& title = {},

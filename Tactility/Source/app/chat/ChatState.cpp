@@ -96,6 +96,12 @@ bool ChatState::getActivePeer(service::reticulum::DestinationHash& outDestinatio
     return true;
 }
 
+void ChatState::setActiveTitle(const std::string& title) {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    activeTitle = title;
+}
+
 std::string ChatState::getActiveTitle() const {
     auto lock = mutex.asScopedLock();
     lock.lock();

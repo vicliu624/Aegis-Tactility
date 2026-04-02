@@ -4,14 +4,20 @@
 #include <Tactility/file/File.h>
 #include <Tactility/kernel/Kernel.h>
 #include <Tactility/service/ServiceManifest.h>
-#include <Tactility/service/reticulum/Reticulum.h>
 #include <Tactility/service/lxmf/LxmfService.h>
+#include <Tactility/service/reticulum/Crypto.h>
+#include <Tactility/service/reticulum/DestinationRegistry.h>
+#include <Tactility/service/reticulum/MessagePack.h>
+#include <Tactility/service/reticulum/Reticulum.h>
+#include <Tactility/settings/ChatSettings.h>
 
 #include <cJSON.h>
 
 #include <algorithm>
 #include <cctype>
+#include <ctime>
 #include <format>
+#include <set>
 #include <string_view>
 
 namespace tt::service::lxmf {
@@ -20,9 +26,29 @@ namespace {
 
 constexpr auto* STATE_FILE_NAME = "state.json";
 constexpr auto* CONVERSATIONS_DIR = "conversations";
-constexpr int STATE_VERSION = 1;
+constexpr int STATE_VERSION = 2;
 constexpr size_t PREVIEW_LENGTH = 80;
 constexpr auto* LOCAL_DESTINATION_NAME = "lxmf.delivery";
+constexpr auto* DEFAULT_DISPLAY_NAME = "Anonymous Peer";
+constexpr size_t LXMF_HEADER_SIZE =
+    reticulum::DESTINATION_HASH_LENGTH * 2 +
+    reticulum::SIGNATURE_LENGTH;
+
+struct PackedLxmfMessage {
+    std::vector<uint8_t> bytes {};
+    std::string transportId {};
+};
+
+struct DecodedLxmfMessage {
+    reticulum::DestinationHash destination {};
+    reticulum::DestinationHash source {};
+    reticulum::SignatureBytes signature {};
+    std::string transportId {};
+    double timestamp = 0.0;
+    std::string title {};
+    std::string body {};
+    bool signatureValid = false;
+};
 
 constexpr int hexNibble(char ch) {
     if (ch >= '0' && ch <= '9') return ch - '0';
@@ -54,6 +80,10 @@ std::string shortenHash(const reticulum::DestinationHash& destination) {
         return hex;
     }
     return hex.substr(0, 8) + ".." + hex.substr(hex.size() - 4);
+}
+
+bool usesFallbackPeerTitle(const std::string& title, const reticulum::DestinationHash& destination) {
+    return title.empty() || title == shortenHash(destination);
 }
 
 std::string makePreview(std::string_view text) {
@@ -93,6 +123,51 @@ std::string safePrintableString(const std::vector<uint8_t>& bytes) {
     return output;
 }
 
+bool decodePeerAppData(const std::vector<uint8_t>& appData, std::string& displayName) {
+    displayName.clear();
+    if (appData.empty()) {
+        return false;
+    }
+
+    if ((appData[0] & 0xF0) == 0x90 || appData[0] == 0xDC) {
+        reticulum::msgpack::Reader reader(appData);
+        size_t count = 0;
+        if (!reader.readArrayHeader(count) || count < 1) {
+            return false;
+        }
+
+        const auto savedOffset = reader.getOffset();
+        if (reader.readNil()) {
+            return true;
+        }
+        reader.setOffset(savedOffset);
+
+        return reader.readString(displayName);
+    }
+
+    displayName = safePrintableString(appData);
+    return !displayName.empty();
+}
+
+bool encodePeerAppData(const std::string& displayName, std::vector<uint8_t>& appData) {
+    appData.clear();
+    if (!reticulum::msgpack::appendArrayHeader(appData, 2)) {
+        return false;
+    }
+
+    if (displayName.empty()) {
+        if (!reticulum::msgpack::appendNil(appData)) {
+            return false;
+        }
+    } else {
+        if (!reticulum::msgpack::appendString(appData, displayName)) {
+            return false;
+        }
+    }
+
+    return reticulum::msgpack::appendNil(appData);
+}
+
 std::string formatPeerSubtitle(const reticulum::AnnounceInfo& announce) {
     if (!announce.interfaceId.empty()) {
         return std::format("{} hops via {}", announce.hops, announce.interfaceId);
@@ -105,6 +180,59 @@ std::string formatPeerSubtitle(const reticulum::PathEntry& path) {
         return std::format("{} hops via {}", path.hops, path.interfaceId);
     }
     return std::format("{} hops", path.hops);
+}
+
+const reticulum::AnnounceInfo* findLxmfPeerAnnounce(
+    const std::vector<reticulum::AnnounceInfo>& announces,
+    const reticulum::DestinationHash& destination,
+    const reticulum::NameHashBytes& deliveryNameHash
+) {
+    const auto iterator = std::find_if(announces.begin(), announces.end(), [&](const auto& announce) {
+        return !announce.local &&
+            announce.destination == destination &&
+            announce.nameHash == deliveryNameHash;
+    });
+    return iterator != announces.end() ? &(*iterator) : nullptr;
+}
+
+const reticulum::PathEntry* findPeerPath(
+    const std::vector<reticulum::PathEntry>& paths,
+    const reticulum::DestinationHash& destination
+) {
+    const auto iterator = std::find_if(paths.begin(), paths.end(), [&](const auto& path) {
+        return path.destination == destination;
+    });
+    return iterator != paths.end() ? &(*iterator) : nullptr;
+}
+
+void enrichPeerPresentation(
+    const reticulum::DestinationHash& destination,
+    const reticulum::NameHashBytes& deliveryNameHash,
+    const std::vector<reticulum::AnnounceInfo>& announces,
+    const std::vector<reticulum::PathEntry>& paths,
+    std::string& title,
+    std::string& subtitle,
+    bool& reachable
+) {
+    if (const auto* announce = findLxmfPeerAnnounce(announces, destination, deliveryNameHash); announce != nullptr) {
+        std::string displayName;
+        if (decodePeerAppData(announce->appData, displayName) && !displayName.empty()) {
+            title = displayName;
+        }
+
+        if (subtitle.empty()) {
+            subtitle = formatPeerSubtitle(*announce);
+        }
+    }
+
+    if (const auto* path = findPeerPath(paths, destination); path != nullptr) {
+        reachable = !path->unresponsive;
+        subtitle = formatPeerSubtitle(*path);
+    }
+
+    if (title.empty()) {
+        title = shortenHash(destination);
+    }
 }
 
 bool parseDeliveryState(const std::string& value, DeliveryState& output) {
@@ -147,6 +275,172 @@ Record* findByDestination(std::vector<Record>& items, const reticulum::Destinati
     return iterator != items.end() ? &(*iterator) : nullptr;
 }
 
+template <typename Record, typename Extractor>
+const Record* findByDestination(const std::vector<Record>& items, const reticulum::DestinationHash& destination, Extractor extractor) {
+    const auto iterator = std::find_if(items.begin(), items.end(), [&](const auto& item) {
+        return extractor(item) == destination;
+    });
+    return iterator != items.end() ? &(*iterator) : nullptr;
+}
+
+bool copyRawMessagePackObject(
+    const std::vector<uint8_t>& packed,
+    reticulum::msgpack::Reader& reader,
+    std::vector<uint8_t>& rawObject
+) {
+    const auto start = reader.getOffset();
+    if (!reader.skip()) {
+        return false;
+    }
+
+    const auto end = reader.getOffset();
+    rawObject.assign(packed.begin() + start, packed.begin() + end);
+    return true;
+}
+
+bool decodeMessagePackBinAsUtf8(const std::vector<uint8_t>& rawObject, std::string& output) {
+    reticulum::msgpack::Reader reader(rawObject);
+    std::vector<uint8_t> bytes;
+    if (!reader.readBin(bytes) || !reader.atEnd()) {
+        return false;
+    }
+
+    output.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    return true;
+}
+
+bool decodeMessagePackDouble(const std::vector<uint8_t>& rawObject, double& output) {
+    reticulum::msgpack::Reader reader(rawObject);
+    return reader.readDouble(output) && reader.atEnd();
+}
+
+bool buildPackedLxmfMessage(
+    const reticulum::DestinationHash& destination,
+    const reticulum::DestinationHash& source,
+    double timestamp,
+    std::string_view title,
+    std::string_view body,
+    PackedLxmfMessage& output
+) {
+    std::vector<uint8_t> packedPayload;
+    if (!reticulum::msgpack::appendArrayHeader(packedPayload, 4) ||
+        !reticulum::msgpack::appendDouble(packedPayload, timestamp) ||
+        !reticulum::msgpack::appendBin(packedPayload, reinterpret_cast<const uint8_t*>(title.data()), title.size()) ||
+        !reticulum::msgpack::appendBin(packedPayload, reinterpret_cast<const uint8_t*>(body.data()), body.size()) ||
+        !reticulum::msgpack::appendNil(packedPayload)) {
+        return false;
+    }
+
+    std::vector<uint8_t> hashedPart;
+    hashedPart.reserve(destination.bytes.size() + source.bytes.size() + packedPayload.size());
+    hashedPart.insert(hashedPart.end(), destination.bytes.begin(), destination.bytes.end());
+    hashedPart.insert(hashedPart.end(), source.bytes.begin(), source.bytes.end());
+    hashedPart.insert(hashedPart.end(), packedPayload.begin(), packedPayload.end());
+
+    reticulum::FullHashBytes messageHash {};
+    if (!reticulum::crypto::sha256(hashedPart.data(), hashedPart.size(), messageHash)) {
+        return false;
+    }
+
+    std::vector<uint8_t> signedPart = hashedPart;
+    signedPart.insert(signedPart.end(), messageHash.begin(), messageHash.end());
+
+    reticulum::SignatureBytes signature {};
+    if (!reticulum::signLocalIdentity(signedPart, signature)) {
+        return false;
+    }
+
+    output.bytes.clear();
+    output.bytes.reserve(destination.bytes.size() + source.bytes.size() + signature.size() + packedPayload.size());
+    output.bytes.insert(output.bytes.end(), destination.bytes.begin(), destination.bytes.end());
+    output.bytes.insert(output.bytes.end(), source.bytes.begin(), source.bytes.end());
+    output.bytes.insert(output.bytes.end(), signature.begin(), signature.end());
+    output.bytes.insert(output.bytes.end(), packedPayload.begin(), packedPayload.end());
+    output.transportId = reticulum::toHex(messageHash);
+    return true;
+}
+
+std::optional<DecodedLxmfMessage> decodePackedLxmfMessage(const std::vector<uint8_t>& lxmfBytes) {
+    if (lxmfBytes.size() < LXMF_HEADER_SIZE) {
+        return std::nullopt;
+    }
+
+    DecodedLxmfMessage output;
+    std::copy_n(lxmfBytes.begin(), output.destination.bytes.size(), output.destination.bytes.begin());
+    std::copy_n(lxmfBytes.begin() + output.destination.bytes.size(), output.source.bytes.size(), output.source.bytes.begin());
+    std::copy_n(lxmfBytes.begin() + output.destination.bytes.size() + output.source.bytes.size(), output.signature.size(), output.signature.begin());
+
+    const std::vector<uint8_t> packedPayload(lxmfBytes.begin() + LXMF_HEADER_SIZE, lxmfBytes.end());
+    reticulum::msgpack::Reader reader(packedPayload);
+    size_t count = 0;
+    if (!reader.readArrayHeader(count) || count < 4) {
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> rawTimestamp;
+    std::vector<uint8_t> rawTitle;
+    std::vector<uint8_t> rawBody;
+    std::vector<uint8_t> rawFields;
+    if (!copyRawMessagePackObject(packedPayload, reader, rawTimestamp) ||
+        !copyRawMessagePackObject(packedPayload, reader, rawTitle) ||
+        !copyRawMessagePackObject(packedPayload, reader, rawBody) ||
+        !copyRawMessagePackObject(packedPayload, reader, rawFields)) {
+        return std::nullopt;
+    }
+
+    for (size_t index = 4; index < count; index++) {
+        if (!reader.skip()) {
+            return std::nullopt;
+        }
+    }
+    if (!reader.atEnd()) {
+        return std::nullopt;
+    }
+
+    if (!decodeMessagePackDouble(rawTimestamp, output.timestamp) ||
+        !decodeMessagePackBinAsUtf8(rawTitle, output.title) ||
+        !decodeMessagePackBinAsUtf8(rawBody, output.body)) {
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> normalizedPayload;
+    if (!reticulum::msgpack::appendArrayHeader(normalizedPayload, 4)) {
+        return std::nullopt;
+    }
+    normalizedPayload.insert(normalizedPayload.end(), rawTimestamp.begin(), rawTimestamp.end());
+    normalizedPayload.insert(normalizedPayload.end(), rawTitle.begin(), rawTitle.end());
+    normalizedPayload.insert(normalizedPayload.end(), rawBody.begin(), rawBody.end());
+    normalizedPayload.insert(normalizedPayload.end(), rawFields.begin(), rawFields.end());
+
+    std::vector<uint8_t> hashedPart;
+    hashedPart.reserve(output.destination.bytes.size() + output.source.bytes.size() + normalizedPayload.size());
+    hashedPart.insert(hashedPart.end(), output.destination.bytes.begin(), output.destination.bytes.end());
+    hashedPart.insert(hashedPart.end(), output.source.bytes.begin(), output.source.bytes.end());
+    hashedPart.insert(hashedPart.end(), normalizedPayload.begin(), normalizedPayload.end());
+
+    reticulum::FullHashBytes messageHash {};
+    if (!reticulum::crypto::sha256(hashedPart.data(), hashedPart.size(), messageHash)) {
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> signedPart = hashedPart;
+    signedPart.insert(signedPart.end(), messageHash.begin(), messageHash.end());
+    output.transportId = reticulum::toHex(messageHash);
+
+    if (const auto identityPublicKey = reticulum::recallIdentityPublicKey(output.source); identityPublicKey.has_value()) {
+        reticulum::Ed25519PublicKeyBytes signingPublicKey {};
+        std::copy_n(identityPublicKey->begin() + reticulum::CURVE25519_KEY_LENGTH, signingPublicKey.size(), signingPublicKey.begin());
+        output.signatureValid = reticulum::crypto::ed25519Verify(
+            signingPublicKey,
+            signedPart.data(),
+            signedPart.size(),
+            output.signature
+        );
+    }
+
+    return output;
+}
+
 } // namespace
 
 static const auto LOGGER = Logger("LXMF");
@@ -171,6 +465,7 @@ void LxmfService::publishEvent(LxmfEvent event) {
 
 bool LxmfService::loadState() {
     conversations.clear();
+    pendingDeliveries.clear();
     nextMessageId = 1;
 
     const auto stateFilePath = paths->getUserDataPath(STATE_FILE_NAME);
@@ -247,6 +542,16 @@ bool LxmfService::loadState() {
                         message.id = static_cast<uint64_t>(cJSON_GetNumberValue(idJson));
                     }
 
+                    if (const auto* transportIdJson = cJSON_GetObjectItemCaseSensitive(messageJson, "transportId");
+                        cJSON_IsString(transportIdJson) && cJSON_GetStringValue(transportIdJson) != nullptr) {
+                        message.transportId = cJSON_GetStringValue(transportIdJson);
+                    }
+
+                    if (const auto* transportTimestampJson = cJSON_GetObjectItemCaseSensitive(messageJson, "transportTimestamp");
+                        cJSON_IsNumber(transportTimestampJson)) {
+                        message.transportTimestamp = cJSON_GetNumberValue(transportTimestampJson);
+                    }
+
                     if (const auto* authorJson = cJSON_GetObjectItemCaseSensitive(messageJson, "author");
                         cJSON_IsString(authorJson) && cJSON_GetStringValue(authorJson) != nullptr) {
                         message.author = cJSON_GetStringValue(authorJson);
@@ -277,6 +582,11 @@ bool LxmfService::loadState() {
                         parseDeliveryState(cJSON_GetStringValue(deliveryJson), message.deliveryState);
                     }
 
+                    if (message.direction == MessageDirection::Outgoing &&
+                        message.deliveryState == DeliveryState::Sending) {
+                        message.deliveryState = DeliveryState::Queued;
+                    }
+
                     record.messages.push_back(std::move(message));
                 }
             }
@@ -293,6 +603,19 @@ bool LxmfService::loadState() {
             }
 
             conversations.push_back(std::move(record));
+        }
+    }
+
+    for (const auto& conversation : conversations) {
+        for (const auto& message : conversation.messages) {
+            if (message.direction == MessageDirection::Outgoing &&
+                message.deliveryState != DeliveryState::Delivered &&
+                message.deliveryState != DeliveryState::Failed) {
+                pendingDeliveries.push_back(PendingDeliveryRecord {
+                    .messageId = message.id,
+                    .peerDestination = message.peerDestination
+                });
+            }
         }
     }
 
@@ -346,6 +669,8 @@ bool LxmfService::persistLocked() const {
             }
 
             cJSON_AddNumberToObject(messageJson, "id", static_cast<double>(message.id));
+            cJSON_AddStringToObject(messageJson, "transportId", message.transportId.c_str());
+            cJSON_AddNumberToObject(messageJson, "transportTimestamp", message.transportTimestamp);
             cJSON_AddStringToObject(messageJson, "direction", messageDirectionToString(message.direction));
             cJSON_AddStringToObject(messageJson, "deliveryState", deliveryStateToString(message.deliveryState));
             cJSON_AddStringToObject(messageJson, "author", message.author.c_str());
@@ -367,6 +692,71 @@ bool LxmfService::persistLocked() const {
     }
     cJSON_Delete(root);
     return success;
+}
+
+bool LxmfService::initialiseLocalDeliveryDestination() {
+    if (!reticulum::DestinationRegistry::deriveNameHash(LOCAL_DESTINATION_NAME, localDeliveryNameHash)) {
+        return false;
+    }
+
+    auto chatSettings = settings::chat::loadOrGetDefault();
+    if (chatSettings.nickname.empty()) {
+        chatSettings.nickname = DEFAULT_DISPLAY_NAME;
+    }
+
+    std::vector<uint8_t> appData;
+    if (!encodePeerAppData(chatSettings.nickname, appData)) {
+        return false;
+    }
+
+    const auto localDestinationsBefore = reticulum::getLocalDestinations();
+    bool registeredNow = false;
+    const auto existing = std::find_if(localDestinationsBefore.begin(), localDestinationsBefore.end(), [](const auto& destination) {
+        return destination.name == LOCAL_DESTINATION_NAME;
+    });
+    if (existing == localDestinationsBefore.end()) {
+        if (!reticulum::registerLocalDestination(reticulum::LocalDestination {
+                .name = LOCAL_DESTINATION_NAME,
+                  .appData = appData,
+                  .acceptsLinks = true,
+                  .announceEnabled = true
+              })) {
+            return false;
+        }
+        registeredNow = true;
+    }
+
+    const auto localDestinations = reticulum::getLocalDestinations();
+    const auto iterator = std::find_if(localDestinations.begin(), localDestinations.end(), [](const auto& destination) {
+        return destination.name == LOCAL_DESTINATION_NAME;
+    });
+    if (iterator == localDestinations.end()) {
+        return false;
+    }
+
+    localDeliveryDestination = iterator->hash;
+    if (!registeredNow && iterator->appData != appData) {
+        if (!reticulum::updateLocalDestinationAppData(localDeliveryDestination, appData) ||
+            !reticulum::announceLocalDestination(localDeliveryDestination)) {
+            return false;
+        }
+    }
+
+    return reticulum::registerLinkHandler(localDeliveryDestination, [this](
+        const reticulum::LinkInfo& link,
+        uint8_t context,
+        const std::vector<uint8_t>& payload,
+        bool viaResource,
+        const std::optional<reticulum::ResourceInfo>& resource
+    ) {
+        if (getRuntimeState() != RuntimeState::Ready || localDeliveryDestination.empty()) {
+            return;
+        }
+
+        if (context == static_cast<uint8_t>(reticulum::PacketContext::None)) {
+            handleInboundPayload(link, payload, viaResource, resource);
+        }
+    });
 }
 
 bool LxmfService::onStart(ServiceContext& serviceContext) {
@@ -401,13 +791,12 @@ bool LxmfService::onStart(ServiceContext& serviceContext) {
         });
     }
 
-    reticulum::registerLocalDestination(reticulum::LocalDestination {
-        .name = LOCAL_DESTINATION_NAME,
-        .appData = {},
-        .acceptsLinks = true,
-        .announceEnabled = true
-    });
+    if (!initialiseLocalDeliveryDestination()) {
+        setRuntimeState(RuntimeState::Faulted, "Failed to register LXMF delivery destination");
+        return false;
+    }
 
+    processPendingDeliveries();
     setRuntimeState(RuntimeState::Ready);
     return true;
 }
@@ -429,6 +818,9 @@ void LxmfService::onStop(ServiceContext& serviceContext) {
         persistLocked();
     }
 
+    localDeliveryDestination = {};
+    localDeliveryNameHash = {};
+
     setRuntimeState(RuntimeState::Stopped);
 }
 
@@ -436,6 +828,199 @@ RuntimeState LxmfService::getRuntimeState() {
     auto lock = mutex.asScopedLock();
     lock.lock();
     return runtimeState;
+}
+
+void LxmfService::processPathUpdate(const reticulum::PathEntry& path) {
+    if (!path.unresponsive) {
+        processPendingDeliveries(path.destination);
+    }
+}
+
+void LxmfService::processLinkUpdate(const reticulum::LinkInfo& link) {
+    if (link.peerDestination.empty()) {
+        return;
+    }
+
+    if (link.state == reticulum::LinkState::Active) {
+        reticulum::identifyLink(link.linkId);
+        processPendingDeliveries(link.peerDestination);
+        return;
+    }
+
+    if (link.state != reticulum::LinkState::Closed && link.state != reticulum::LinkState::Stale) {
+        return;
+    }
+
+    std::vector<MessageInfo> changedMessages;
+    std::vector<ConversationInfo> changedConversations;
+
+    {
+        auto lock = mutex.asScopedLock();
+        lock.lock();
+
+        const auto findMessage = [this](uint64_t messageId) -> MessageInfo* {
+            for (auto& conversation : conversations) {
+                const auto iterator = std::find_if(conversation.messages.begin(), conversation.messages.end(), [&](const auto& message) {
+                    return message.id == messageId;
+                });
+                if (iterator != conversation.messages.end()) {
+                    return &(*iterator);
+                }
+            }
+            return nullptr;
+        };
+
+        for (auto it = pendingDeliveries.begin(); it != pendingDeliveries.end();) {
+            if (it->linkId != link.linkId) {
+                ++it;
+                continue;
+            }
+
+            auto* message = findMessage(it->messageId);
+            if (message == nullptr) {
+                it = pendingDeliveries.erase(it);
+                continue;
+            }
+
+            message->deliveryState = it->resourceHash.has_value()
+                ? DeliveryState::Failed
+                : DeliveryState::Queued;
+            changedMessages.push_back(*message);
+
+            if (auto* conversation = findByDestination(conversations, message->peerDestination, [](const auto& item) -> const reticulum::DestinationHash& {
+                    return item.summary.peerDestination;
+                });
+                conversation != nullptr) {
+                conversation->summary.lastDeliveryState = message->deliveryState;
+                changedConversations.push_back(conversation->summary);
+            }
+
+            if (it->resourceHash.has_value()) {
+                it = pendingDeliveries.erase(it);
+            } else {
+                it->linkId = {};
+                ++it;
+            }
+        }
+
+        if ((!changedMessages.empty() || !changedConversations.empty()) && !persistLocked()) {
+            LOGGER.warn("Failed to persist LXMF state after link reset");
+        }
+    }
+
+    for (const auto& message : changedMessages) {
+        publishEvent(LxmfEvent {
+            .type = EventType::MessageListChanged,
+            .runtimeState = getRuntimeState(),
+            .message = message,
+            .destination = message.peerDestination,
+            .detail = std::format("Reset delivery state for LXMF message {}", message.id)
+        });
+    }
+
+    for (const auto& conversation : changedConversations) {
+        publishEvent(LxmfEvent {
+            .type = EventType::ConversationListChanged,
+            .runtimeState = getRuntimeState(),
+            .conversation = conversation,
+            .destination = conversation.peerDestination,
+            .detail = std::format("Conversation transport reset for {}", reticulum::toHex(conversation.peerDestination))
+        });
+    }
+
+    processPendingDeliveries(link.peerDestination);
+}
+
+void LxmfService::processResourceUpdate(const reticulum::ResourceInfo& resource) {
+    if (resource.carriesRequest || resource.carriesResponse) {
+        return;
+    }
+
+    MessageInfo changedMessage;
+    ConversationInfo changedConversation;
+    bool publishMessage = false;
+    bool publishConversation = false;
+
+    {
+        auto lock = mutex.asScopedLock();
+        lock.lock();
+
+        const auto pendingIterator = std::find_if(pendingDeliveries.begin(), pendingDeliveries.end(), [&](const auto& record) {
+            return record.resourceHash.has_value() && record.resourceHash.value() == resource.resourceHash;
+        });
+        if (pendingIterator == pendingDeliveries.end()) {
+            return;
+        }
+
+        auto* message = [&]() -> MessageInfo* {
+            for (auto& conversation : conversations) {
+                const auto iterator = std::find_if(conversation.messages.begin(), conversation.messages.end(), [&](const auto& item) {
+                    return item.id == pendingIterator->messageId;
+                });
+                if (iterator != conversation.messages.end()) {
+                    return &(*iterator);
+                }
+            }
+            return nullptr;
+        }();
+        if (message == nullptr) {
+            pendingDeliveries.erase(pendingIterator);
+            return;
+        }
+
+        switch (resource.state) {
+            case reticulum::ResourceState::Complete:
+                message->deliveryState = DeliveryState::Delivered;
+                pendingDeliveries.erase(pendingIterator);
+                break;
+
+            case reticulum::ResourceState::Failed:
+            case reticulum::ResourceState::Rejected:
+            case reticulum::ResourceState::Corrupt:
+                message->deliveryState = DeliveryState::Failed;
+                pendingDeliveries.erase(pendingIterator);
+                break;
+
+            default:
+                return;
+        }
+
+        changedMessage = *message;
+        publishMessage = true;
+
+        if (auto* conversation = findByDestination(conversations, message->peerDestination, [](const auto& item) -> const reticulum::DestinationHash& {
+                return item.summary.peerDestination;
+            });
+            conversation != nullptr) {
+            conversation->summary.lastDeliveryState = message->deliveryState;
+            changedConversation = conversation->summary;
+            publishConversation = true;
+        }
+
+        if (!persistLocked()) {
+            LOGGER.warn("Failed to persist LXMF state after resource update");
+        }
+    }
+
+    if (publishMessage) {
+        publishEvent(LxmfEvent {
+            .type = EventType::MessageListChanged,
+            .runtimeState = getRuntimeState(),
+            .message = changedMessage,
+            .destination = changedMessage.peerDestination,
+            .detail = std::format("Updated LXMF message {} after resource state {}", changedMessage.id, reticulum::resourceStateToString(resource.state))
+        });
+    }
+
+    if (publishConversation) {
+        publishEvent(LxmfEvent {
+            .type = EventType::ConversationListChanged,
+            .runtimeState = getRuntimeState(),
+            .conversation = changedConversation,
+            .destination = changedConversation.peerDestination,
+            .detail = std::format("Updated conversation after resource {}", reticulum::toHex(resource.resourceHash))
+        });
+    }
 }
 
 void LxmfService::onReticulumEvent(const reticulum::ReticulumEvent& event) {
@@ -446,7 +1031,6 @@ void LxmfService::onReticulumEvent(const reticulum::ReticulumEvent& event) {
         case reticulum::EventType::InterfaceStarted:
         case reticulum::EventType::InterfaceStopped:
         case reticulum::EventType::AnnounceObserved:
-        case reticulum::EventType::PathTableChanged:
         case reticulum::EventType::LocalDestinationRegistered:
             publishEvent(LxmfEvent {
                 .type = EventType::PeerDirectoryChanged,
@@ -459,6 +1043,35 @@ void LxmfService::onReticulumEvent(const reticulum::ReticulumEvent& event) {
                 .detail = event.detail
             });
             break;
+
+        case reticulum::EventType::PathTableChanged:
+            if (event.path.has_value()) {
+                processPathUpdate(*event.path);
+            }
+            publishEvent(LxmfEvent {
+                .type = EventType::PeerDirectoryChanged,
+                .runtimeState = getRuntimeState(),
+                .detail = event.detail
+            });
+            publishEvent(LxmfEvent {
+                .type = EventType::ConversationListChanged,
+                .runtimeState = getRuntimeState(),
+                .detail = event.detail
+            });
+            break;
+
+        case reticulum::EventType::LinkTableChanged:
+            if (event.link.has_value()) {
+                processLinkUpdate(*event.link);
+            }
+            break;
+
+        case reticulum::EventType::ResourceTableChanged:
+            if (event.resource.has_value()) {
+                processResourceUpdate(*event.resource);
+            }
+            break;
+
         default:
             break;
     }
@@ -487,39 +1100,51 @@ std::vector<PeerInfo> LxmfService::getPeers() {
         return records.back();
     };
 
+    std::set<std::string> lxmfDestinations;
     for (const auto& announce : reticulum::getAnnounces()) {
+        if (announce.nameHash != localDeliveryNameHash) {
+            continue;
+        }
+
         auto& record = upsertRecord(announce.destination);
         record.local = record.local || announce.local;
         record.info.hops = announce.hops;
 
-        const auto printableName = safePrintableString(announce.appData);
-        if (!printableName.empty()) {
-            record.info.title = printableName;
+        std::string displayName;
+        if (decodePeerAppData(announce.appData, displayName) && !displayName.empty()) {
+            record.info.title = displayName;
         }
 
         if (!announce.local) {
             record.info.subtitle = formatPeerSubtitle(announce);
         }
+
+        lxmfDestinations.insert(reticulum::toHex(announce.destination));
     }
 
     for (const auto& path : reticulum::getPaths()) {
+        if (lxmfDestinations.find(reticulum::toHex(path.destination)) == lxmfDestinations.end()) {
+            continue;
+        }
+
         auto& record = upsertRecord(path.destination);
         record.info.reachable = !path.unresponsive;
         record.info.hops = path.hops;
         record.info.subtitle = formatPeerSubtitle(path);
     }
 
-    {
-        auto lock = mutex.asScopedLock();
-        lock.lock();
-        for (const auto& conversation : conversations) {
-            auto& record = upsertRecord(conversation.summary.peerDestination);
-            if (!conversation.summary.title.empty()) {
-                record.info.title = conversation.summary.title;
-            }
-            if (record.info.subtitle.empty() && !conversation.summary.subtitle.empty()) {
-                record.info.subtitle = conversation.summary.subtitle;
-            }
+      {
+          auto lock = mutex.asScopedLock();
+          lock.lock();
+          for (const auto& conversation : conversations) {
+              auto& record = upsertRecord(conversation.summary.peerDestination);
+              if (!conversation.summary.title.empty() &&
+                  usesFallbackPeerTitle(record.info.title, conversation.summary.peerDestination)) {
+                  record.info.title = conversation.summary.title;
+              }
+              if (record.info.subtitle.empty() && !conversation.summary.subtitle.empty()) {
+                  record.info.subtitle = conversation.summary.subtitle;
+              }
         }
     }
 
@@ -542,6 +1167,7 @@ std::vector<PeerInfo> LxmfService::getPeers() {
 }
 
 std::vector<ConversationInfo> LxmfService::getConversations() {
+    const auto announces = reticulum::getAnnounces();
     const auto paths = reticulum::getPaths();
 
     auto lock = mutex.asScopedLock();
@@ -549,16 +1175,19 @@ std::vector<ConversationInfo> LxmfService::getConversations() {
 
     std::vector<ConversationInfo> result;
     result.reserve(conversations.size());
-    for (const auto& conversation : conversations) {
-        auto summary = conversation.summary;
-        summary.reachable = std::any_of(paths.begin(), paths.end(), [&summary](const auto& path) {
-            return path.destination == summary.peerDestination && !path.unresponsive;
-        });
-        if (summary.title.empty()) {
-            summary.title = shortenHash(summary.peerDestination);
-        }
-        result.push_back(std::move(summary));
-    }
+      for (const auto& conversation : conversations) {
+          auto summary = conversation.summary;
+          enrichPeerPresentation(
+              summary.peerDestination,
+              localDeliveryNameHash,
+              announces,
+              paths,
+              summary.title,
+              summary.subtitle,
+              summary.reachable
+          );
+          result.push_back(std::move(summary));
+      }
 
     std::ranges::sort(result, [](const auto& left, const auto& right) {
         if (left.lastActivityTick != right.lastActivityTick) {
@@ -571,6 +1200,9 @@ std::vector<ConversationInfo> LxmfService::getConversations() {
 }
 
 std::vector<MessageInfo> LxmfService::getMessages(const reticulum::DestinationHash& peerDestination) {
+    const auto announces = reticulum::getAnnounces();
+    const auto paths = reticulum::getPaths();
+
     auto lock = mutex.asScopedLock();
     lock.lock();
 
@@ -578,10 +1210,66 @@ std::vector<MessageInfo> LxmfService::getMessages(const reticulum::DestinationHa
         return item.summary.peerDestination;
     });
         record != nullptr) {
-        return record->messages;
+        std::string peerTitle = record->summary.title;
+        std::string subtitle = record->summary.subtitle;
+        bool reachable = false;
+        enrichPeerPresentation(
+            peerDestination,
+            localDeliveryNameHash,
+            announces,
+            paths,
+            peerTitle,
+            subtitle,
+            reachable
+        );
+
+        auto messages = record->messages;
+        for (auto& message : messages) {
+            if (message.direction == MessageDirection::Incoming) {
+                message.author = peerTitle;
+            }
+        }
+        return messages;
     }
 
     return {};
+}
+
+bool LxmfService::refreshLocalPeerProfile() {
+    if (localDeliveryDestination.empty()) {
+        return false;
+    }
+
+    auto chatSettings = settings::chat::loadOrGetDefault();
+    if (chatSettings.nickname.empty()) {
+        chatSettings.nickname = DEFAULT_DISPLAY_NAME;
+    }
+
+    std::vector<uint8_t> appData;
+    if (!encodePeerAppData(chatSettings.nickname, appData)) {
+        return false;
+    }
+
+    if (!reticulum::updateLocalDestinationAppData(localDeliveryDestination, appData) ||
+        !reticulum::announceLocalDestination(localDeliveryDestination)) {
+        return false;
+    }
+
+    publishEvent(LxmfEvent {
+        .type = EventType::PeerDirectoryChanged,
+        .runtimeState = getRuntimeState(),
+        .destination = localDeliveryDestination,
+        .detail = std::format("Refreshed local LXMF profile for {}", chatSettings.nickname)
+    });
+
+    publishEvent(LxmfEvent {
+        .type = EventType::ConversationListChanged,
+        .runtimeState = getRuntimeState(),
+        .destination = localDeliveryDestination,
+        .detail = std::format("Updated local LXMF announce profile for {}", chatSettings.nickname)
+    });
+
+    return true;
 }
 
 bool LxmfService::ensureConversation(
@@ -637,6 +1325,264 @@ bool LxmfService::ensureConversation(
     return true;
 }
 
+void LxmfService::processPendingDeliveries(const std::optional<reticulum::DestinationHash>& peerDestination) {
+    struct Candidate {
+        uint64_t messageId = 0;
+        reticulum::DestinationHash peerDestination {};
+        std::string body {};
+        double transportTimestamp = 0.0;
+    };
+
+    std::vector<Candidate> candidates;
+    {
+        auto lock = mutex.asScopedLock();
+        lock.lock();
+
+        auto findMessage = [this](uint64_t messageId) -> const MessageInfo* {
+            for (const auto& conversation : conversations) {
+                const auto iterator = std::find_if(conversation.messages.begin(), conversation.messages.end(), [&](const auto& message) {
+                    return message.id == messageId;
+                });
+                if (iterator != conversation.messages.end()) {
+                    return &(*iterator);
+                }
+            }
+            return nullptr;
+        };
+
+        for (const auto& pending : pendingDeliveries) {
+            if (peerDestination.has_value() && pending.peerDestination != *peerDestination) {
+                continue;
+            }
+
+            if (pending.resourceHash.has_value()) {
+                continue;
+            }
+
+            const auto* message = findMessage(pending.messageId);
+            if (message == nullptr ||
+                message->direction != MessageDirection::Outgoing ||
+                message->deliveryState == DeliveryState::Delivered ||
+                message->deliveryState == DeliveryState::Failed) {
+                continue;
+            }
+
+            candidates.push_back(Candidate {
+                .messageId = message->id,
+                .peerDestination = message->peerDestination,
+                .body = message->body,
+                .transportTimestamp = message->transportTimestamp
+            });
+        }
+    }
+
+    if (candidates.empty() || localDeliveryDestination.empty()) {
+        return;
+    }
+
+    const auto links = reticulum::getLinks();
+    const auto paths = reticulum::getPaths();
+
+    for (const auto& candidate : candidates) {
+        const auto activeLink = std::find_if(links.begin(), links.end(), [&](const auto& link) {
+            return link.peerDestination == candidate.peerDestination &&
+                link.state == reticulum::LinkState::Active;
+        });
+
+        if (activeLink != links.end()) {
+            PackedLxmfMessage packedMessage;
+            const auto transportTimestamp = candidate.transportTimestamp != 0.0
+                ? candidate.transportTimestamp
+                : static_cast<double>(std::time(nullptr));
+            if (!buildPackedLxmfMessage(
+                    candidate.peerDestination,
+                    localDeliveryDestination,
+                    transportTimestamp,
+                    {},
+                    candidate.body,
+                    packedMessage)) {
+                continue;
+            }
+
+            reticulum::ResourceInfo resource;
+            if (!reticulum::sendLinkResource(activeLink->linkId, packedMessage.bytes, &resource)) {
+                continue;
+            }
+
+            MessageInfo changedMessage;
+            ConversationInfo changedConversation;
+            bool publishConversation = false;
+
+            {
+                auto lock = mutex.asScopedLock();
+                lock.lock();
+
+                const auto pendingIterator = std::find_if(pendingDeliveries.begin(), pendingDeliveries.end(), [&](const auto& pending) {
+                    return pending.messageId == candidate.messageId;
+                });
+                if (pendingIterator == pendingDeliveries.end()) {
+                    continue;
+                }
+
+                auto* message = [&]() -> MessageInfo* {
+                    for (auto& conversation : conversations) {
+                        const auto iterator = std::find_if(conversation.messages.begin(), conversation.messages.end(), [&](const auto& item) {
+                            return item.id == candidate.messageId;
+                        });
+                        if (iterator != conversation.messages.end()) {
+                            return &(*iterator);
+                        }
+                    }
+                    return nullptr;
+                }();
+                if (message == nullptr) {
+                    continue;
+                }
+
+                pendingIterator->linkId = activeLink->linkId;
+                pendingIterator->resourceHash = resource.resourceHash;
+
+                message->transportTimestamp = transportTimestamp;
+                message->transportId = packedMessage.transportId;
+                message->deliveryState = DeliveryState::Sending;
+                changedMessage = *message;
+
+                if (auto* conversation = findByDestination(conversations, message->peerDestination, [](const auto& item) -> const reticulum::DestinationHash& {
+                        return item.summary.peerDestination;
+                    });
+                    conversation != nullptr) {
+                    conversation->summary.lastDeliveryState = message->deliveryState;
+                    changedConversation = conversation->summary;
+                    publishConversation = true;
+                }
+
+                if (!persistLocked()) {
+                    LOGGER.warn("Failed to persist LXMF state after starting resource send");
+                }
+            }
+
+            publishEvent(LxmfEvent {
+                .type = EventType::MessageListChanged,
+                .runtimeState = getRuntimeState(),
+                .message = changedMessage,
+                .destination = changedMessage.peerDestination,
+                .detail = std::format("Sending LXMF message {} via resource {}", changedMessage.id, reticulum::toHex(resource.resourceHash))
+            });
+
+            if (publishConversation) {
+                publishEvent(LxmfEvent {
+                    .type = EventType::ConversationListChanged,
+                    .runtimeState = getRuntimeState(),
+                    .conversation = changedConversation,
+                    .destination = changedConversation.peerDestination,
+                    .detail = std::format("Conversation sending to {}", reticulum::toHex(changedConversation.peerDestination))
+                });
+            }
+
+            continue;
+        }
+
+        const auto pendingLink = std::find_if(links.begin(), links.end(), [&](const auto& link) {
+            return link.peerDestination == candidate.peerDestination &&
+                (link.state == reticulum::LinkState::Pending || link.state == reticulum::LinkState::Handshake);
+        });
+        if (pendingLink != links.end()) {
+            auto lock = mutex.asScopedLock();
+            lock.lock();
+
+            const auto pendingIterator = std::find_if(pendingDeliveries.begin(), pendingDeliveries.end(), [&](const auto& pending) {
+                return pending.messageId == candidate.messageId;
+            });
+            if (pendingIterator != pendingDeliveries.end()) {
+                pendingIterator->linkId = pendingLink->linkId;
+            }
+
+            for (auto& conversation : conversations) {
+                const auto iterator = std::find_if(conversation.messages.begin(), conversation.messages.end(), [&](const auto& message) {
+                    return message.id == candidate.messageId;
+                });
+                if (iterator != conversation.messages.end()) {
+                    iterator->deliveryState = DeliveryState::Sending;
+                    break;
+                }
+            }
+            continue;
+        }
+
+        const auto pathIterator = std::find_if(paths.begin(), paths.end(), [&](const auto& path) {
+            return path.destination == candidate.peerDestination && !path.unresponsive;
+        });
+        if (pathIterator == paths.end()) {
+            reticulum::requestPath(candidate.peerDestination);
+            continue;
+        }
+
+        reticulum::DestinationHash linkId {};
+        if (!reticulum::openLink(candidate.peerDestination, linkId)) {
+            continue;
+        }
+
+        MessageInfo changedMessage;
+        ConversationInfo changedConversation;
+        bool publishMessage = false;
+        bool publishConversation = false;
+
+        {
+            auto lock = mutex.asScopedLock();
+            lock.lock();
+
+            const auto pendingIterator = std::find_if(pendingDeliveries.begin(), pendingDeliveries.end(), [&](const auto& pending) {
+                return pending.messageId == candidate.messageId;
+            });
+            if (pendingIterator != pendingDeliveries.end()) {
+                pendingIterator->linkId = linkId;
+            }
+
+            for (auto& conversation : conversations) {
+                const auto iterator = std::find_if(conversation.messages.begin(), conversation.messages.end(), [&](const auto& message) {
+                    return message.id == candidate.messageId;
+                });
+                if (iterator == conversation.messages.end()) {
+                    continue;
+                }
+
+                iterator->deliveryState = DeliveryState::Sending;
+                changedMessage = *iterator;
+                publishMessage = true;
+
+                conversation.summary.lastDeliveryState = iterator->deliveryState;
+                changedConversation = conversation.summary;
+                publishConversation = true;
+                break;
+            }
+
+            if (publishMessage && !persistLocked()) {
+                LOGGER.warn("Failed to persist LXMF state after opening link");
+            }
+        }
+
+        if (publishMessage) {
+            publishEvent(LxmfEvent {
+                .type = EventType::MessageListChanged,
+                .runtimeState = getRuntimeState(),
+                .message = changedMessage,
+                .destination = changedMessage.peerDestination,
+                .detail = std::format("Opened LXMF link {} for message {}", reticulum::toHex(linkId), changedMessage.id)
+            });
+        }
+
+        if (publishConversation) {
+            publishEvent(LxmfEvent {
+                .type = EventType::ConversationListChanged,
+                .runtimeState = getRuntimeState(),
+                .conversation = changedConversation,
+                .destination = changedConversation.peerDestination,
+                .detail = std::format("Conversation waiting on link {}", reticulum::toHex(linkId))
+            });
+        }
+    }
+}
+
 bool LxmfService::queueOutgoingMessage(
     const reticulum::DestinationHash& peerDestination,
     const std::string& author,
@@ -669,6 +1615,7 @@ bool LxmfService::queueOutgoingMessage(
         message = MessageInfo {
             .id = nextMessageId++,
             .peerDestination = peerDestination,
+            .transportTimestamp = static_cast<double>(std::time(nullptr)),
             .direction = MessageDirection::Outgoing,
             .deliveryState = DeliveryState::Queued,
             .author = author,
@@ -683,6 +1630,11 @@ bool LxmfService::queueOutgoingMessage(
         record->summary.lastDeliveryState = message.deliveryState;
 
         conversation = record->summary;
+
+        pendingDeliveries.push_back(PendingDeliveryRecord {
+            .messageId = message.id,
+            .peerDestination = peerDestination
+        });
 
         if (!persistLocked()) {
             LOGGER.warn("Failed to persist LXMF state after queueOutgoingMessage");
@@ -706,7 +1658,148 @@ bool LxmfService::queueOutgoingMessage(
         .detail = std::format("Conversation updated for {}", reticulum::toHex(peerDestination))
     });
 
+    processPendingDeliveries(peerDestination);
     return true;
+}
+
+void LxmfService::handleInboundPayload(
+    const reticulum::LinkInfo& link,
+    const std::vector<uint8_t>& payload,
+    bool viaResource,
+    const std::optional<reticulum::ResourceInfo>& resource
+) {
+    if (localDeliveryDestination.empty()) {
+        return;
+    }
+
+    const auto decoded = decodePackedLxmfMessage(payload);
+    if (!decoded.has_value() || decoded->destination != localDeliveryDestination || decoded->source == localDeliveryDestination) {
+        return;
+    }
+
+    if (!decoded->signatureValid && reticulum::recallIdentityPublicKey(decoded->source).has_value()) {
+        publishEvent(LxmfEvent {
+            .type = EventType::Error,
+            .runtimeState = getRuntimeState(),
+            .destination = decoded->source,
+            .detail = std::format("Rejected LXMF message {} with invalid signature", decoded->transportId)
+        });
+        return;
+    }
+
+    MessageInfo message;
+    ConversationInfo conversation;
+    bool isDuplicate = false;
+
+    {
+        auto lock = mutex.asScopedLock();
+        lock.lock();
+
+        const auto* duplicate = [&]() -> const MessageInfo* {
+            if (decoded->transportId.empty()) {
+                return nullptr;
+            }
+
+            if (const auto* record = findByDestination(conversations, decoded->source, [](const auto& item) -> const reticulum::DestinationHash& {
+                    return item.summary.peerDestination;
+                });
+                record != nullptr) {
+                const auto iterator = std::find_if(record->messages.begin(), record->messages.end(), [&](const auto& existing) {
+                    return existing.transportId == decoded->transportId;
+                });
+                if (iterator != record->messages.end()) {
+                    return &(*iterator);
+                }
+            }
+
+            return nullptr;
+        }();
+        if (duplicate != nullptr) {
+            isDuplicate = true;
+        } else {
+            auto* record = findByDestination(conversations, decoded->source, [](const auto& item) -> const reticulum::DestinationHash& {
+                return item.summary.peerDestination;
+            });
+            if (record == nullptr) {
+                conversations.push_back(ConversationRecord {
+                    .summary = ConversationInfo {
+                        .peerDestination = decoded->source,
+                        .title = shortenHash(decoded->source)
+                    }
+                });
+                record = &conversations.back();
+            }
+
+            std::string author = record->summary.title.empty() ? shortenHash(decoded->source) : record->summary.title;
+            if (author == shortenHash(decoded->source)) {
+                for (const auto& announce : reticulum::getAnnounces()) {
+                    if (announce.destination != decoded->source) {
+                        continue;
+                    }
+
+                    std::string displayName;
+                    if (decodePeerAppData(announce.appData, displayName) && !displayName.empty()) {
+                        author = displayName;
+                        record->summary.title = displayName;
+                    }
+                    if (record->summary.subtitle.empty()) {
+                        record->summary.subtitle = formatPeerSubtitle(announce);
+                    }
+                    break;
+                }
+            }
+
+            message = MessageInfo {
+                .id = nextMessageId++,
+                .peerDestination = decoded->source,
+                .transportId = decoded->transportId,
+                .transportTimestamp = decoded->timestamp,
+                .direction = MessageDirection::Incoming,
+                .deliveryState = DeliveryState::Delivered,
+                .author = author,
+                .body = decoded->body,
+                .createdTick = kernel::getTicks(),
+                .read = false
+            };
+
+            record->messages.push_back(message);
+            record->summary.preview = makePreview(message.body);
+            record->summary.lastActivityTick = message.createdTick;
+            record->summary.lastDeliveryState = message.deliveryState;
+            record->summary.unreadCount += 1;
+            conversation = record->summary;
+
+            if (!persistLocked()) {
+                LOGGER.warn("Failed to persist LXMF state after inbound delivery");
+            }
+        }
+    }
+
+    if (isDuplicate) {
+        return;
+    }
+
+    publishEvent(LxmfEvent {
+        .type = EventType::MessageListChanged,
+        .runtimeState = getRuntimeState(),
+        .conversation = conversation,
+        .message = message,
+        .destination = decoded->source,
+        .detail = std::format(
+            "Received LXMF message {} on {} via {}",
+            decoded->transportId,
+            reticulum::toHex(link.linkId),
+            viaResource && resource.has_value() ? reticulum::toHex(resource->resourceHash) : "packet"
+        )
+    });
+
+    publishEvent(LxmfEvent {
+        .type = EventType::ConversationListChanged,
+        .runtimeState = getRuntimeState(),
+        .conversation = conversation,
+        .destination = decoded->source,
+        .detail = std::format("Conversation updated for {}", reticulum::toHex(decoded->source))
+    });
 }
 
 bool LxmfService::markConversationRead(const reticulum::DestinationHash& peerDestination) {

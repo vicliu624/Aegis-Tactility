@@ -96,6 +96,28 @@ bool DestinationRegistry::registerLocalDestination(
     return true;
 }
 
+bool DestinationRegistry::updateLocalDestinationAppData(
+    const DestinationHash& destinationHash,
+    const std::vector<uint8_t>& appData
+) {
+    if (destinationHash.empty()) {
+        return false;
+    }
+
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+
+    const auto iterator = std::find_if(localDestinations.begin(), localDestinations.end(), [&](auto& item) {
+        return item.hash == destinationHash;
+    });
+    if (iterator == localDestinations.end()) {
+        return false;
+    }
+
+    iterator->appData = appData;
+    return true;
+}
+
 std::vector<RegisteredDestination> DestinationRegistry::getLocalDestinations() const {
     auto lock = mutex.asScopedLock();
     lock.lock();

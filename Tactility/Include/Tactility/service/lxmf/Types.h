@@ -49,6 +49,8 @@ struct ConversationInfo {
 struct MessageInfo {
     uint64_t id = 0;
     reticulum::DestinationHash peerDestination {};
+    std::string transportId {};
+    double transportTimestamp = 0.0;
     MessageDirection direction = MessageDirection::Incoming;
     DeliveryState deliveryState = DeliveryState::Queued;
     std::string author {};
