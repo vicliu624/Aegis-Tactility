@@ -44,31 +44,6 @@ DestinationHash DestinationRegistry::deriveProvisionalHash(
     return output;
 }
 
-DestinationHash DestinationRegistry::deriveSharedEndpointHash(const std::string& endpointName) {
-    uint64_t first = FNV_OFFSET;
-    for (const auto ch : std::string_view("reticulum-app-endpoint:")) {
-        first = fnv1aUpdate(first, static_cast<uint8_t>(ch));
-    }
-    for (const auto ch : endpointName) {
-        first = fnv1aUpdate(first, static_cast<uint8_t>(ch));
-    }
-
-    uint64_t second = FNV_OFFSET ^ 0xD6E8FEB86659FD93ULL;
-    for (const auto ch : std::string_view("shared-endpoint")) {
-        second = fnv1aUpdate(second, static_cast<uint8_t>(ch));
-    }
-    for (auto it = endpointName.rbegin(); it != endpointName.rend(); ++it) {
-        second = fnv1aUpdate(second, static_cast<uint8_t>(*it));
-    }
-
-    DestinationHash output;
-    for (size_t i = 0; i < 8; i++) {
-        output.bytes[i] = static_cast<uint8_t>((first >> (i * 8)) & 0xFF);
-        output.bytes[8 + i] = static_cast<uint8_t>((second >> (i * 8)) & 0xFF);
-    }
-    return output;
-}
-
 bool DestinationRegistry::registerLocalDestination(
     const LocalDestination& destination,
     const IdentityStore::BootstrapIdentity& bootstrapIdentity
@@ -102,61 +77,6 @@ std::vector<RegisteredDestination> DestinationRegistry::getLocalDestinations() c
     auto lock = mutex.asScopedLock();
     lock.lock();
     return localDestinations;
-}
-
-bool DestinationRegistry::registerAppEndpoint(const std::string& endpointName) {
-    if (endpointName.empty()) {
-        return false;
-    }
-
-    auto lock = mutex.asScopedLock();
-    lock.lock();
-
-    for (const auto& existing : appEndpoints) {
-        if (existing.name == endpointName) {
-            return false;
-        }
-    }
-
-    appEndpoints.push_back(AppEndpoint {
-        .name = endpointName,
-        .hash = deriveSharedEndpointHash(endpointName),
-        .provisionalHash = true
-    });
-
-    return true;
-}
-
-std::vector<AppEndpoint> DestinationRegistry::getAppEndpoints() const {
-    auto lock = mutex.asScopedLock();
-    lock.lock();
-    return appEndpoints;
-}
-
-std::optional<AppEndpoint> DestinationRegistry::findAppEndpoint(const std::string& endpointName) const {
-    auto lock = mutex.asScopedLock();
-    lock.lock();
-
-    for (const auto& endpoint : appEndpoints) {
-        if (endpoint.name == endpointName) {
-            return endpoint;
-        }
-    }
-
-    return std::nullopt;
-}
-
-std::optional<AppEndpoint> DestinationRegistry::findAppEndpoint(const DestinationHash& hash) const {
-    auto lock = mutex.asScopedLock();
-    lock.lock();
-
-    for (const auto& endpoint : appEndpoints) {
-        if (endpoint.hash == hash) {
-            return endpoint;
-        }
-    }
-
-    return std::nullopt;
 }
 
 } // namespace tt::service::reticulum

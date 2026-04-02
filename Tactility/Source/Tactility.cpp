@@ -49,6 +49,7 @@ static Dispatcher mainDispatcher;
 namespace service {
     // Primary
     namespace gps { extern const ServiceManifest manifest; }
+    namespace lxmf { extern const ServiceManifest manifest; }
     namespace reticulum { extern const ServiceManifest manifest; }
     namespace wifi { extern const ServiceManifest manifest; }
 #ifdef ESP_PLATFORM
@@ -101,6 +102,7 @@ namespace app {
     namespace localesettings { extern const AppManifest manifest; }
     namespace notes { extern const AppManifest manifest; }
     namespace power { extern const AppManifest manifest; }
+    namespace reticulumsettings { extern const AppManifest manifest; }
     namespace selectiondialog { extern const AppManifest manifest; }
     namespace settings { extern const AppManifest manifest; }
     namespace systeminfo { extern const AppManifest manifest; }
@@ -127,6 +129,7 @@ namespace app {
 
 #if defined(CONFIG_SOC_WIFI_SUPPORTED) && !defined(CONFIG_SLAVE_SOC_WIFI_SUPPORTED)
     namespace chat { extern const AppManifest manifest; }
+    namespace chatprofile { extern const AppManifest manifest; }
 #endif
 }
 
@@ -182,11 +185,13 @@ static void registerInternalApps() {
 
 #if defined(CONFIG_SOC_WIFI_SUPPORTED) && !defined(CONFIG_SLAVE_SOC_WIFI_SUPPORTED)
     addAppManifest(app::chat::manifest);
+    addAppManifest(app::chatprofile::manifest);
 #endif
 
     if (device_exists_of_type(&UART_CONTROLLER_TYPE)) {
         addAppManifest(app::addgps::manifest);
         addAppManifest(app::gpssettings::manifest);
+        addAppManifest(app::reticulumsettings::manifest);
     }
 
     if (hal::hasDevice(hal::Device::Type::Power)) {
@@ -274,6 +279,7 @@ static void registerAndStartPrimaryServices() {
     addService(service::espnow::manifest);
 #endif
     addService(service::reticulum::manifest);
+    addService(service::lxmf::manifest);
 #ifdef ESP_PLATFORM
     addService(service::webserver::manifest);
 #endif

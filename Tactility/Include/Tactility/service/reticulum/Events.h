@@ -17,7 +17,6 @@ enum class EventType {
     AnnounceObserved,
     InboundFrameQueued,
     PacketDecoded,
-    AppDataReceived,
     PathTableChanged,
     LinkTableChanged,
     ResourceTableChanged,
@@ -30,7 +29,6 @@ struct ReticulumEvent {
     std::optional<InterfaceDescriptor> interface {};
     std::optional<PacketSummary> packet {};
     std::optional<AnnounceInfo> announce {};
-    std::optional<AppDataInfo> appData {};
     std::optional<PathEntry> path {};
     std::optional<DestinationHash> destination {};
     std::string detail {};

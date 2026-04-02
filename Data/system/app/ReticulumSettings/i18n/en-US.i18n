@@ -1,0 +1,22 @@
+Reticulum LoRa
+Reticulum: {} | LoRa: {}
+running
+stopped
+active
+inactive
+Applying settings...
+Enabled
+UART
+Baud
+Frequency (Hz)
+Bandwidth (Hz)
+TX Power (dBm)
+Spreading Factor
+Coding Rate
+Flow Control
+Save
+Settings saved and Reticulum restarted
+Failed to save settings
+Invalid LoRa settings
+Failed to restart Reticulum service
+No UARTs found

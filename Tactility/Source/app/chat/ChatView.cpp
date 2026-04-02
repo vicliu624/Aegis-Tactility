@@ -7,133 +7,50 @@
 #include <Tactility/app/chat/ChatView.h>
 #include <Tactility/app/chat/ChatAppPrivate.h>
 #include <Tactility/app/chat/Localization.h>
-#include <Tactility/app/chat/ChatProtocol.h>
 
+#include <Tactility/app/App.h>
 #include <Tactility/lvgl/Toolbar.h>
 
 #include <cstring>
+#include <format>
 
 namespace tt::app::chat {
 
-void ChatView::addMessageToList(lv_obj_t* list, const StoredMessage& msg) {
-    auto* label = lv_label_create(list);
-    lv_label_set_text(label, msg.displayText.c_str());
-    lv_obj_set_width(label, lv_pct(100));
-    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_set_style_pad_all(label, 2, 0);
+namespace {
 
-    if (msg.isOwn) {
-        if (lv_display_get_color_format(lv_obj_get_display(label)) != LV_COLOR_FORMAT_L8) {
-            lv_obj_set_style_text_color(label, lv_color_hex(0x80C0FF), 0);
-        }
+constexpr uint32_t MAX_COMPOSE_LENGTH = 1024;
+
+static std::string deliveryStateLabel(service::lxmf::DeliveryState state) {
+    switch (state) {
+        case service::lxmf::DeliveryState::Queued:
+            return getTextResources()[i18n::Text::STATUS_QUEUED];
+        case service::lxmf::DeliveryState::Sending:
+            return getTextResources()[i18n::Text::STATUS_SENDING];
+        case service::lxmf::DeliveryState::Delivered:
+            return getTextResources()[i18n::Text::STATUS_DELIVERED];
+        case service::lxmf::DeliveryState::Failed:
+            return getTextResources()[i18n::Text::STATUS_FAILED];
     }
+    return getTextResources()[i18n::Text::STATUS_QUEUED];
 }
 
-void ChatView::updateToolbarTitle() {
-    if (!state || !toolbar) return;
-    std::string channel = state->getCurrentChannel();
-    std::string title = formatText(i18n::Text::CHAT_TITLE_FMT, channel);
-    lvgl::toolbar_set_title(toolbar, title);
-}
+} // namespace
 
-void ChatView::createInputBar(lv_obj_t* parent) {
-    inputWrapper = lv_obj_create(parent);
-    auto* wrapper = inputWrapper;
-    lv_obj_set_flex_flow(wrapper, LV_FLEX_FLOW_ROW);
-    lv_obj_set_size(wrapper, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(wrapper, 0, 0);
-    lv_obj_set_style_pad_column(wrapper, 4, 0);
-    lv_obj_set_style_border_opa(wrapper, 0, LV_STATE_DEFAULT);
+void ChatView::configureListButton(lv_obj_t* button) {
+    if (button == nullptr) {
+        return;
+    }
 
-    inputField = lv_textarea_create(wrapper);
-    lv_obj_set_flex_grow(inputField, 1);
-    lv_textarea_set_placeholder_text(inputField, getTextResources()[i18n::Text::MESSAGE_PLACEHOLDER].c_str());
-    lv_textarea_set_one_line(inputField, true);
-    lv_textarea_set_max_length(inputField, MAX_MESSAGE_LEN);
+    lv_obj_set_height(button, LV_SIZE_CONTENT);
+    if (auto* icon = lv_obj_get_child(button, 0); icon != nullptr) {
+        lv_obj_set_style_text_opa(icon, LV_OPA_80, LV_PART_MAIN);
+    }
 
-    auto* sendBtn = lv_button_create(wrapper);
-    lv_obj_set_style_margin_all(sendBtn, 0, LV_STATE_DEFAULT);
-    lv_obj_set_style_margin_top(sendBtn, 2, LV_STATE_DEFAULT);
-    lv_obj_add_event_cb(sendBtn, onSendClicked, LV_EVENT_CLICKED, this);
-
-    auto* btnLabel = lv_label_create(sendBtn);
-    lv_label_set_text(btnLabel, getTextResources()[i18n::Text::SEND].c_str());
-    lv_obj_center(btnLabel);
-}
-
-void ChatView::createSettingsPanel(lv_obj_t* parent) {
-    settingsPanel = lv_obj_create(parent);
-    lv_obj_set_width(settingsPanel, LV_PCT(100));
-    lv_obj_set_flex_grow(settingsPanel, 1);
-    lv_obj_set_flex_flow(settingsPanel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(settingsPanel, 8, 0);
-    lv_obj_set_style_pad_row(settingsPanel, 6, 0);
-    lv_obj_add_flag(settingsPanel, LV_OBJ_FLAG_HIDDEN);
-
-    // Nickname
-    auto* nickLabel = lv_label_create(settingsPanel);
-    const auto nicknameLabel = formatText(i18n::Text::NICKNAME_LABEL_FMT, MAX_NICKNAME_LEN);
-    lv_label_set_text(nickLabel, nicknameLabel.c_str());
-
-    nicknameInput = lv_textarea_create(settingsPanel);
-    lv_obj_set_width(nicknameInput, LV_PCT(100));
-    lv_textarea_set_one_line(nicknameInput, true);
-    lv_textarea_set_max_length(nicknameInput, MAX_NICKNAME_LEN);
-
-    // Buttons
-    auto* btnRow = lv_obj_create(settingsPanel);
-    lv_obj_set_flex_flow(btnRow, LV_FLEX_FLOW_ROW);
-    lv_obj_set_size(btnRow, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(btnRow, 0, 0);
-    lv_obj_set_style_pad_column(btnRow, 8, 0);
-    lv_obj_set_style_border_opa(btnRow, 0, 0);
-
-    auto* saveBtn = lv_button_create(btnRow);
-    lv_obj_add_event_cb(saveBtn, onSettingsSave, LV_EVENT_CLICKED, this);
-    auto* saveLbl = lv_label_create(saveBtn);
-    lv_label_set_text(saveLbl, getTextResources()[i18n::Text::SAVE].c_str());
-
-    auto* cancelBtn = lv_button_create(btnRow);
-    lv_obj_add_event_cb(cancelBtn, onSettingsCancel, LV_EVENT_CLICKED, this);
-    auto* cancelLbl = lv_label_create(cancelBtn);
-    lv_label_set_text(cancelLbl, getTextResources()[i18n::Text::CANCEL].c_str());
-}
-
-void ChatView::createChannelPanel(lv_obj_t* parent) {
-    channelPanel = lv_obj_create(parent);
-    lv_obj_set_width(channelPanel, LV_PCT(100));
-    lv_obj_set_flex_grow(channelPanel, 1);
-    lv_obj_set_flex_flow(channelPanel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(channelPanel, 8, 0);
-    lv_obj_set_style_pad_row(channelPanel, 6, 0);
-    lv_obj_add_flag(channelPanel, LV_OBJ_FLAG_HIDDEN);
-
-    auto* label = lv_label_create(channelPanel);
-    const auto channelLabel = formatText(i18n::Text::CHANNEL_LABEL_FMT, "#general");
-    lv_label_set_text(label, channelLabel.c_str());
-
-    channelInput = lv_textarea_create(channelPanel);
-    lv_obj_set_width(channelInput, LV_PCT(100));
-    lv_textarea_set_one_line(channelInput, true);
-    lv_textarea_set_max_length(channelInput, MAX_TARGET_LEN);
-
-    auto* btnRow = lv_obj_create(channelPanel);
-    lv_obj_set_flex_flow(btnRow, LV_FLEX_FLOW_ROW);
-    lv_obj_set_size(btnRow, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(btnRow, 0, 0);
-    lv_obj_set_style_pad_column(btnRow, 8, 0);
-    lv_obj_set_style_border_opa(btnRow, 0, 0);
-
-    auto* okBtn = lv_button_create(btnRow);
-    lv_obj_add_event_cb(okBtn, onChannelSave, LV_EVENT_CLICKED, this);
-    auto* okLbl = lv_label_create(okBtn);
-    lv_label_set_text(okLbl, getTextResources()[i18n::Text::OK].c_str());
-
-    auto* cancelBtn = lv_button_create(btnRow);
-    lv_obj_add_event_cb(cancelBtn, onChannelCancel, LV_EVENT_CLICKED, this);
-    auto* cancelLbl = lv_label_create(cancelBtn);
-    lv_label_set_text(cancelLbl, getTextResources()[i18n::Text::CANCEL].c_str());
+    if (auto* label = lv_obj_get_child(button, 1); label != nullptr) {
+        lv_obj_set_width(label, LV_PCT(100));
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_line_space(label, 4, LV_PART_MAIN);
+    }
 }
 
 void ChatView::init(AppContext& appContext, lv_obj_t* parent) {
@@ -141,135 +58,208 @@ void ChatView::init(AppContext& appContext, lv_obj_t* parent) {
     lv_obj_set_style_pad_row(parent, 0, LV_STATE_DEFAULT);
 
     toolbar = lvgl::toolbar_create(parent, appContext);
-    lvgl::toolbar_add_text_button_action(toolbar, LV_SYMBOL_LIST, onChannelClicked, this);
-    lvgl::toolbar_add_text_button_action(toolbar, LV_SYMBOL_SETTINGS, onSettingsClicked, this);
-    updateToolbarTitle();
+    lvgl::toolbar_set_nav_action(toolbar, LV_SYMBOL_LEFT, onBackPressed, this);
 
-    // Message list
-    msgList = lv_list_create(parent);
-    lv_obj_set_flex_grow(msgList, 1);
-    lv_obj_set_width(msgList, LV_PCT(100));
-    if (lv_display_get_color_format(lv_obj_get_display(parent)) != LV_COLOR_FORMAT_L8) {
-        lv_obj_set_style_bg_color(msgList, lv_color_hex(0x262626), 0);
-    }
-    lv_obj_set_style_border_width(msgList, 0, 0);
-    lv_obj_set_style_pad_ver(msgList, 2, 0);
-    lv_obj_set_style_pad_hor(msgList, 4, 0);
+    list = lv_list_create(parent);
+    lv_obj_set_flex_grow(list, 1);
+    lv_obj_set_width(list, LV_PCT(100));
+    lv_obj_set_style_border_width(list, 0, 0);
 
-    // Input bar
     createInputBar(parent);
-
-    // Overlay panels (hidden by default)
-    createSettingsPanel(parent);
-    createChannelPanel(parent);
 }
 
-void ChatView::displayMessage(const StoredMessage& msg) {
-    if (!msgList || !state) return;
+void ChatView::createInputBar(lv_obj_t* parent) {
+    inputWrapper = lv_obj_create(parent);
+    lv_obj_set_flex_flow(inputWrapper, LV_FLEX_FLOW_ROW);
+    lv_obj_set_size(inputWrapper, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(inputWrapper, 0, 0);
+    lv_obj_set_style_pad_column(inputWrapper, 4, 0);
+    lv_obj_set_style_border_opa(inputWrapper, 0, LV_STATE_DEFAULT);
 
-    // Only show if matches current channel or broadcast
-    std::string channel = state->getCurrentChannel();
-    if (!msg.target.empty() && msg.target != channel) {
+    inputField = lv_textarea_create(inputWrapper);
+    lv_obj_set_flex_grow(inputField, 1);
+    lv_textarea_set_placeholder_text(inputField, getTextResources()[i18n::Text::MESSAGE_PLACEHOLDER].c_str());
+    lv_textarea_set_one_line(inputField, true);
+    lv_textarea_set_max_length(inputField, MAX_COMPOSE_LENGTH);
+
+    auto* sendButton = lv_button_create(inputWrapper);
+    lv_obj_set_style_margin_all(sendButton, 0, LV_STATE_DEFAULT);
+    lv_obj_set_style_margin_top(sendButton, 2, LV_STATE_DEFAULT);
+    lv_obj_add_event_cb(sendButton, onSendClicked, LV_EVENT_CLICKED, this);
+
+    auto* buttonLabel = lv_label_create(sendButton);
+    lv_label_set_text(buttonLabel, getTextResources()[i18n::Text::SEND].c_str());
+    lv_obj_center(buttonLabel);
+}
+
+void ChatView::configureToolbar() {
+    if (toolbar == nullptr) {
         return;
     }
-    addMessageToList(msgList, msg);
-    lv_obj_scroll_to_y(msgList, LV_COORD_MAX, LV_ANIM_ON);
-}
 
-void ChatView::refreshMessageList() {
-    if (!msgList || !state) return;
+    const auto screenMode = state->getScreenMode();
 
-    lv_obj_clean(msgList);
-    auto filtered = state->getFilteredMessages();
-    for (const auto& msg : filtered) {
-        addMessageToList(msgList, msg);
+    if (!toolbarConfigured || configuredScreenMode != screenMode) {
+        lvgl::toolbar_clear_actions(toolbar);
+
+        switch (screenMode) {
+            case ScreenMode::Conversations:
+                lvgl::toolbar_add_text_button_action(toolbar, getTextResources()[i18n::Text::NEW].c_str(), onNewConversationPressed, this);
+                break;
+            case ScreenMode::Contacts:
+                break;
+            case ScreenMode::Thread:
+                break;
+        }
+
+        toolbarConfigured = true;
+        configuredScreenMode = screenMode;
     }
-    lv_obj_scroll_to_y(msgList, LV_COORD_MAX, LV_ANIM_OFF);
-    updateToolbarTitle();
+
+    switch (screenMode) {
+        case ScreenMode::Conversations:
+            lvgl::toolbar_set_title(toolbar, getLocalizedAppName());
+            break;
+        case ScreenMode::Contacts:
+            lvgl::toolbar_set_title(toolbar, getTextResources()[i18n::Text::NEW_MESSAGE_TITLE]);
+            break;
+        case ScreenMode::Thread:
+            lvgl::toolbar_set_title(toolbar, state->getActiveTitle());
+            break;
+    }
 }
 
-void ChatView::showSettings(const ChatSettingsData& current) {
-    if (!settingsPanel) return;
-
-    lv_textarea_set_text(nicknameInput, current.nickname.c_str());
-
-    lv_obj_add_flag(msgList, LV_OBJ_FLAG_HIDDEN);
+void ChatView::refreshConversationList() {
     lv_obj_add_flag(inputWrapper, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(settingsPanel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clean(list);
+
+    const auto conversations = state->getConversations();
+    if (conversations.empty()) {
+        lv_list_add_text(list, getTextResources()[i18n::Text::NO_CONVERSATIONS].c_str());
+        return;
+    }
+
+    for (size_t index = 0; index < conversations.size(); index++) {
+        const auto& conversation = conversations[index];
+        const auto preview = conversation.preview.empty()
+            ? getTextResources()[i18n::Text::NO_MESSAGES_YET]
+            : conversation.preview;
+        const auto title = conversation.unreadCount > 0
+            ? std::format("[{}] {}", conversation.unreadCount, conversation.title)
+            : conversation.title;
+        const auto line = std::format("{}\n{}\n{}", title, preview, conversation.subtitle);
+        auto* button = lv_list_add_button(list, conversation.reachable ? LV_SYMBOL_OK : LV_SYMBOL_WARNING, line.c_str());
+        lv_obj_set_user_data(button, reinterpret_cast<void*>(index));
+        lv_obj_add_event_cb(button, onConversationSelected, LV_EVENT_SHORT_CLICKED, this);
+        configureListButton(button);
+    }
 }
 
-void ChatView::hideSettings() {
-    if (!settingsPanel || !msgList || !inputWrapper) return;
-    lv_obj_add_flag(settingsPanel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(msgList, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(inputWrapper, LV_OBJ_FLAG_HIDDEN);
-}
-
-void ChatView::showChannelSelector() {
-    if (!channelPanel || !state) return;
-
-    std::string current = state->getCurrentChannel();
-    lv_textarea_set_text(channelInput, current.c_str());
-
-    lv_obj_add_flag(msgList, LV_OBJ_FLAG_HIDDEN);
+void ChatView::refreshPeerList() {
     lv_obj_add_flag(inputWrapper, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(channelPanel, LV_OBJ_FLAG_HIDDEN);
-}
+    lv_obj_clean(list);
 
-void ChatView::hideChannelSelector() {
-    if (!channelPanel || !msgList || !inputWrapper) return;
-    lv_obj_add_flag(channelPanel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(msgList, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(inputWrapper, LV_OBJ_FLAG_HIDDEN);
-}
+    const auto peers = state->getPeers();
+    if (peers.empty()) {
+        lv_list_add_text(list, getTextResources()[i18n::Text::NO_CONTACTS].c_str());
+        return;
+    }
 
-void ChatView::onSendClicked(lv_event_t* e) {
-    auto* self = static_cast<ChatView*>(lv_event_get_user_data(e));
-    auto* text = lv_textarea_get_text(self->inputField);
-    if (text && strlen(text) > 0) {
-        self->app->sendMessage(std::string(text));
-        lv_textarea_set_text(self->inputField, "");
+    for (size_t index = 0; index < peers.size(); index++) {
+        const auto& peer = peers[index];
+        const auto line = std::format("{}\n{}", peer.title, peer.subtitle);
+        auto* button = lv_list_add_button(list, peer.reachable ? LV_SYMBOL_OK : LV_SYMBOL_WARNING, line.c_str());
+        lv_obj_set_user_data(button, reinterpret_cast<void*>(index));
+        lv_obj_add_event_cb(button, onPeerSelected, LV_EVENT_SHORT_CLICKED, this);
+        configureListButton(button);
     }
 }
 
-void ChatView::onSettingsClicked(lv_event_t* e) {
-    auto* self = static_cast<ChatView*>(lv_event_get_user_data(e));
-    self->showSettings(self->app->getSettings());
-}
+void ChatView::refreshThread() {
+    lv_obj_clear_flag(inputWrapper, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clean(list);
 
-void ChatView::onSettingsSave(lv_event_t* e) {
-    auto* self = static_cast<ChatView*>(lv_event_get_user_data(e));
-
-    auto* nickname = lv_textarea_get_text(self->nicknameInput);
-
-    if (nickname && strlen(nickname) > 0) {
-        self->app->applySettings(std::string(nickname));
+    const auto messages = state->getMessages();
+    if (messages.empty()) {
+        lv_list_add_text(list, getTextResources()[i18n::Text::NO_MESSAGES_YET].c_str());
+        return;
     }
-    self->hideSettings();
-}
 
-void ChatView::onSettingsCancel(lv_event_t* e) {
-    auto* self = static_cast<ChatView*>(lv_event_get_user_data(e));
-    self->hideSettings();
-}
+    for (const auto& message : messages) {
+        auto* label = lv_label_create(list);
+        std::string header = message.author;
+        if (message.direction == service::lxmf::MessageDirection::Outgoing) {
+            header = std::format("{}  {}", message.author, deliveryStateLabel(message.deliveryState));
+        }
 
-void ChatView::onChannelClicked(lv_event_t* e) {
-    auto* self = static_cast<ChatView*>(lv_event_get_user_data(e));
-    self->showChannelSelector();
-}
+        const auto text = std::format("{}\n{}", header, message.body);
+        lv_label_set_text(label, text.c_str());
+        lv_obj_set_width(label, lv_pct(100));
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_set_style_pad_all(label, 6, 0);
 
-void ChatView::onChannelSave(lv_event_t* e) {
-    auto* self = static_cast<ChatView*>(lv_event_get_user_data(e));
-    auto* text = lv_textarea_get_text(self->channelInput);
-    if (text && strlen(text) > 0) {
-        self->app->switchChannel(std::string(text));
+        if (message.direction == service::lxmf::MessageDirection::Outgoing
+            && lv_display_get_color_format(lv_obj_get_display(label)) != LV_COLOR_FORMAT_L8) {
+            lv_obj_set_style_text_color(label, lv_color_hex(0x80C0FF), 0);
+        }
     }
-    self->hideChannelSelector();
+
+    lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
 }
 
-void ChatView::onChannelCancel(lv_event_t* e) {
-    auto* self = static_cast<ChatView*>(lv_event_get_user_data(e));
-    self->hideChannelSelector();
+void ChatView::refresh() {
+    configureToolbar();
+
+    switch (state->getScreenMode()) {
+        case ScreenMode::Conversations:
+            refreshConversationList();
+            break;
+        case ScreenMode::Contacts:
+            refreshPeerList();
+            break;
+        case ScreenMode::Thread:
+            refreshThread();
+            break;
+    }
+}
+
+void ChatView::onNewConversationPressed(lv_event_t* event) {
+    auto* self = static_cast<ChatView*>(lv_event_get_user_data(event));
+    self->app->showContactPicker();
+}
+
+void ChatView::onBackPressed(lv_event_t* event) {
+    auto* self = static_cast<ChatView*>(lv_event_get_user_data(event));
+    if (self->state->getScreenMode() == ScreenMode::Conversations) {
+        app::stop();
+    } else {
+        self->app->showConversationList();
+    }
+}
+
+void ChatView::onConversationSelected(lv_event_t* event) {
+    auto* self = static_cast<ChatView*>(lv_event_get_user_data(event));
+    auto* button = lv_event_get_current_target_obj(event);
+    const auto index = reinterpret_cast<size_t>(lv_obj_get_user_data(button));
+    self->app->openConversationByIndex(index);
+}
+
+void ChatView::onPeerSelected(lv_event_t* event) {
+    auto* self = static_cast<ChatView*>(lv_event_get_user_data(event));
+    auto* button = lv_event_get_current_target_obj(event);
+    const auto index = reinterpret_cast<size_t>(lv_obj_get_user_data(button));
+    self->app->openPeerByIndex(index);
+}
+
+void ChatView::onSendClicked(lv_event_t* event) {
+    auto* self = static_cast<ChatView*>(lv_event_get_user_data(event));
+    const auto* text = lv_textarea_get_text(self->inputField);
+    if (text != nullptr && strlen(text) > 0) {
+        if (self->app->sendMessage(std::string(text))) {
+            lv_textarea_set_text(self->inputField, "");
+        }
+    }
 }
 
 } // namespace tt::app::chat

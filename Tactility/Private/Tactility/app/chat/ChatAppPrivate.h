@@ -8,38 +8,41 @@
 
 #include "ChatState.h"
 #include "ChatView.h"
-#include "ChatSettings.h"
 
 #include <Tactility/app/App.h>
 #include <Tactility/PubSub.h>
-#include <Tactility/service/reticulum/Reticulum.h>
+#include <Tactility/service/lxmf/Events.h>
+#include <Tactility/settings/ChatSettings.h>
 
 namespace tt::app::chat {
 
 class ChatApp final : public App {
 
-    using ReticulumEvent = service::reticulum::ReticulumEvent;
-
     ChatState state;
     ChatView view = ChatView(this, &state);
-    PubSub<ReticulumEvent>::SubscriptionHandle reticulumSubscription = nullptr;
-    ChatSettingsData settings;
-    bool isFirstLaunch = false;
+    settings::chat::ChatSettings settings;
+    PubSub<service::lxmf::LxmfEvent>::SubscriptionHandle lxmfSubscription = nullptr;
+    bool viewVisible = false;
 
-    void ensureReticulumBindings();
-    void onReticulumEvent(const ReticulumEvent& event);
-    void onReceivePayload(const std::vector<uint8_t>& data);
+    void refreshStateFromServices();
+    void requestViewRefresh();
+    void openConversation(
+        const service::reticulum::DestinationHash& peerDestination,
+        const std::string& title,
+        const std::string& subtitle = {}
+    );
 
 public:
     void onCreate(AppContext& appContext) override;
     void onDestroy(AppContext& appContext) override;
     void onShow(AppContext& context, lv_obj_t* parent) override;
+    void onHide(AppContext& context) override;
 
-    void sendMessage(const std::string& text);
-    void applySettings(const std::string& nickname);
-    void switchChannel(const std::string& chatChannel);
-
-    const ChatSettingsData& getSettings() const { return settings; }
+    bool sendMessage(const std::string& text);
+    void showConversationList();
+    void showContactPicker();
+    void openConversationByIndex(size_t index);
+    void openPeerByIndex(size_t index);
 
     ~ChatApp() override = default;
 };

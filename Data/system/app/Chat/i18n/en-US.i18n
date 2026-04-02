@@ -1,10 +1,13 @@
 Chat
-Chat: {}
 Type a message...
 Send
-Nickname (max {}):
-Save
-Cancel
-Channel (e.g. {}):
-OK
+New
+New Message
+No conversations yet
+No Reticulum contacts discovered yet
+No messages yet
+Queued
+Sending
+Delivered
+Failed
 Device

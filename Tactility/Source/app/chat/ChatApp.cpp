@@ -6,158 +6,179 @@
 
 #include <Tactility/app/chat/ChatAppPrivate.h>
 #include <Tactility/app/chat/Localization.h>
-#include <Tactility/app/chat/ChatProtocol.h>
 
 #include <Tactility/app/AppManifest.h>
 #include <Tactility/Logger.h>
 #include <Tactility/lvgl/LvglSync.h>
+#include <Tactility/service/lxmf/Lxmf.h>
 
-#include <algorithm>
 #include <tactility/lvgl_icon_shared.h>
-#include <vector>
 
 namespace tt::app::chat {
 
+namespace {
+
+static std::string shortenHash(const service::reticulum::DestinationHash& destination) {
+    const auto hex = service::reticulum::toHex(destination);
+    if (hex.size() <= 12) {
+        return hex;
+    }
+    return hex.substr(0, 8) + ".." + hex.substr(hex.size() - 4);
+}
+
+static std::string resolveConversationTitle(const service::lxmf::ConversationInfo& conversation) {
+    return conversation.title.empty() ? shortenHash(conversation.peerDestination) : conversation.title;
+}
+
+static std::string resolvePeerTitle(const service::lxmf::PeerInfo& peer) {
+    return peer.title.empty() ? shortenHash(peer.destination) : peer.title;
+}
+
+} // namespace
+
 static const auto LOGGER = Logger("ChatApp");
-static constexpr auto* CHAT_ENDPOINT = "aegis.chat.broadcast";
-static constexpr auto* CHAT_DESTINATION = "aegis.chat";
 
-void ChatApp::ensureReticulumBindings() {
-    const auto endpoints = service::reticulum::getAppEndpoints();
-    const auto hasEndpoint = std::ranges::any_of(endpoints, [](const auto& endpoint) {
-        return endpoint.name == CHAT_ENDPOINT;
-    });
-    if (!hasEndpoint && !service::reticulum::registerAppEndpoint(CHAT_ENDPOINT)) {
-        LOGGER.warn("Failed to register chat endpoint {}", CHAT_ENDPOINT);
+void ChatApp::refreshStateFromServices() {
+    const auto screenMode = state.getScreenMode();
+    state.setConversations(service::lxmf::getConversations());
+    state.setPeers(service::lxmf::getPeers());
+
+    if (screenMode == ScreenMode::Thread) {
+        service::reticulum::DestinationHash peerDestination;
+        if (state.getActivePeer(peerDestination)) {
+            state.setMessages(service::lxmf::getMessages(peerDestination));
+            service::lxmf::markConversationRead(peerDestination);
+        }
+    } else {
+        state.setMessages({});
+    }
+}
+
+void ChatApp::requestViewRefresh() {
+    if (!viewVisible) {
+        return;
     }
 
-    const auto destinations = service::reticulum::getLocalDestinations();
-    const auto hasDestination = std::ranges::any_of(destinations, [](const auto& destination) {
-        return destination.name == CHAT_DESTINATION;
-    });
-    if (!hasDestination) {
-        service::reticulum::registerLocalDestination(service::reticulum::LocalDestination {
-            .name = CHAT_DESTINATION,
-            .acceptsLinks = false,
-            .announceEnabled = true
-        });
+    if (lvgl::lock(1000)) {
+        view.refresh();
+        lvgl::unlock();
+    } else {
+        LOGGER.warn("Failed to lock LVGL for Chat refresh");
     }
+}
+
+void ChatApp::openConversation(
+    const service::reticulum::DestinationHash& peerDestination,
+    const std::string& title,
+    const std::string& subtitle
+) {
+    service::lxmf::ensureConversation(peerDestination, title, subtitle);
+    state.showThread(peerDestination, title.empty() ? shortenHash(peerDestination) : title);
+    state.setMessages(service::lxmf::getMessages(peerDestination));
+    service::lxmf::markConversationRead(peerDestination);
+    requestViewRefresh();
 }
 
 void ChatApp::onCreate(AppContext& appContext) {
-    isFirstLaunch = !settingsFileExists();
-    settings = loadSettings();
-    state.setLocalNickname(settings.nickname);
-    if (!settings.chatChannel.empty()) {
-        state.setCurrentChannel(settings.chatChannel);
+    settings = settings::chat::loadOrGetDefault();
+    if (settings.nickname.empty()) {
+        settings.nickname = getDefaultNickname();
     }
-    ensureReticulumBindings();
+    state.setLocalNickname(settings.nickname);
+    state.showConversations();
 
-    if (const auto pubsub = service::reticulum::getPubsub(); pubsub != nullptr) {
-        reticulumSubscription = pubsub->subscribe([this](ReticulumEvent event) {
-            onReticulumEvent(event);
+    if (const auto pubsub = service::lxmf::getPubsub(); pubsub != nullptr) {
+        lxmfSubscription = pubsub->subscribe([this](service::lxmf::LxmfEvent event) {
+            switch (event.type) {
+                case service::lxmf::EventType::RuntimeStateChanged:
+                case service::lxmf::EventType::PeerDirectoryChanged:
+                case service::lxmf::EventType::ConversationListChanged:
+                case service::lxmf::EventType::MessageListChanged:
+                    refreshStateFromServices();
+                    requestViewRefresh();
+                    break;
+                default:
+                    break;
+            }
         });
     }
+
+    refreshStateFromServices();
 }
 
 void ChatApp::onDestroy(AppContext& appContext) {
-    if (reticulumSubscription != nullptr) {
-        if (const auto pubsub = service::reticulum::getPubsub(); pubsub != nullptr) {
-            pubsub->unsubscribe(reticulumSubscription);
+    if (lxmfSubscription != nullptr) {
+        if (const auto pubsub = service::lxmf::getPubsub(); pubsub != nullptr) {
+            pubsub->unsubscribe(lxmfSubscription);
         }
-        reticulumSubscription = nullptr;
+        lxmfSubscription = nullptr;
     }
 }
 
 void ChatApp::onShow(AppContext& context, lv_obj_t* parent) {
+    viewVisible = true;
     view.init(context, parent);
-    if (isFirstLaunch) {
-        view.showSettings(settings);
-    }
+    refreshStateFromServices();
+    view.refresh();
 }
 
-void ChatApp::onReceivePayload(const std::vector<uint8_t>& data) {
-    ParsedMessage parsed;
-    if (!deserializeMessage(data.data(), data.size(), parsed)) {
+void ChatApp::onHide(AppContext& context) {
+    viewVisible = false;
+}
+
+void ChatApp::showConversationList() {
+    state.showConversations();
+    refreshStateFromServices();
+    requestViewRefresh();
+}
+
+void ChatApp::showContactPicker() {
+    state.showContacts();
+    refreshStateFromServices();
+    requestViewRefresh();
+}
+
+void ChatApp::openConversationByIndex(size_t index) {
+    const auto conversations = state.getConversations();
+    if (index >= conversations.size()) {
         return;
     }
 
-    StoredMessage msg;
-    msg.displayText = parsed.senderName + ": " + parsed.message;
-    msg.target = parsed.target;
-    msg.isOwn = false;
-
-    state.addMessage(msg);
-
-    {
-        auto lock = lvgl::getSyncLock()->asScopedLock();
-        lock.lock();
-        view.displayMessage(msg);
-    }
+    const auto& conversation = conversations[index];
+    openConversation(
+        conversation.peerDestination,
+        resolveConversationTitle(conversation),
+        conversation.subtitle
+    );
 }
 
-void ChatApp::onReticulumEvent(const ReticulumEvent& event) {
-    if (event.type != service::reticulum::EventType::AppDataReceived || !event.appData.has_value()) {
+void ChatApp::openPeerByIndex(size_t index) {
+    const auto peers = state.getPeers();
+    if (index >= peers.size()) {
         return;
     }
 
-    if (event.appData->endpoint != CHAT_ENDPOINT) {
-        return;
-    }
-
-    onReceivePayload(event.appData->payload);
+    const auto& peer = peers[index];
+    openConversation(peer.destination, resolvePeerTitle(peer), peer.subtitle);
 }
 
-void ChatApp::sendMessage(const std::string& text) {
-    if (text.empty()) return;
-
-    std::string nickname = state.getLocalNickname();
-    std::string channel = state.getCurrentChannel();
-
-    std::vector<uint8_t> wireMsg;
-    if (!serializeTextMessage(settings.senderId, BROADCAST_ID, nickname, channel, text, wireMsg)) {
-        LOGGER.error("Failed to serialize message");
-        return;
+bool ChatApp::sendMessage(const std::string& text) {
+    if (text.empty()) {
+        return false;
     }
 
-    if (!service::reticulum::broadcastAppData(CHAT_ENDPOINT, wireMsg)) {
-        LOGGER.error("Failed to broadcast message through Reticulum");
-        return;
+    service::reticulum::DestinationHash peerDestination;
+    if (!state.getActivePeer(peerDestination)) {
+        return false;
     }
 
-    StoredMessage msg;
-    msg.displayText = nickname + ": " + text;
-    msg.target = channel;
-    msg.isOwn = true;
-
-    state.addMessage(msg);
-
-    {
-        auto lock = lvgl::getSyncLock()->asScopedLock();
-        lock.lock();
-        view.displayMessage(msg);
+    if (!service::lxmf::queueOutgoingMessage(peerDestination, state.getLocalNickname(), text)) {
+        return false;
     }
-}
 
-void ChatApp::applySettings(const std::string& nickname) {
-    // Trim nickname to protocol limit
-    settings.nickname = nickname.substr(0, MAX_NICKNAME_LEN);
-
-    state.setLocalNickname(settings.nickname);
-    saveSettings(settings);
-}
-
-void ChatApp::switchChannel(const std::string& chatChannel) {
-    const auto trimmedChannel = chatChannel.substr(0, MAX_TARGET_LEN);
-    state.setCurrentChannel(trimmedChannel);
-    settings.chatChannel = trimmedChannel;
-    saveSettings(settings);
-
-    {
-        auto lock = lvgl::getSyncLock()->asScopedLock();
-        lock.lock();
-        view.refreshMessageList();
-    }
+    state.setMessages(service::lxmf::getMessages(peerDestination));
+    requestViewRefresh();
+    return true;
 }
 
 extern const AppManifest manifest = {

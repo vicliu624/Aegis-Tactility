@@ -20,39 +20,86 @@ std::string ChatState::getLocalNickname() const {
     return localNickname;
 }
 
-void ChatState::setCurrentChannel(const std::string& channel) {
+void ChatState::showConversations() {
     auto lock = mutex.asScopedLock();
     lock.lock();
-    currentChannel = channel;
+    screenMode = ScreenMode::Conversations;
 }
 
-std::string ChatState::getCurrentChannel() const {
+void ChatState::showContacts() {
     auto lock = mutex.asScopedLock();
     lock.lock();
-    return currentChannel;
+    screenMode = ScreenMode::Contacts;
 }
 
-void ChatState::addMessage(const StoredMessage& msg) {
+void ChatState::showThread(
+    const service::reticulum::DestinationHash& peerDestination,
+    const std::string& title
+) {
     auto lock = mutex.asScopedLock();
     lock.lock();
-    if (messages.size() >= MAX_MESSAGES) {
-        messages.pop_front();
+    screenMode = ScreenMode::Thread;
+    activePeer = peerDestination;
+    activeTitle = title;
+    hasActivePeer = true;
+}
+
+ScreenMode ChatState::getScreenMode() const {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    return screenMode;
+}
+
+void ChatState::setConversations(std::vector<service::lxmf::ConversationInfo> items) {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    conversations = std::move(items);
+}
+
+std::vector<service::lxmf::ConversationInfo> ChatState::getConversations() const {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    return conversations;
+}
+
+void ChatState::setPeers(std::vector<service::lxmf::PeerInfo> items) {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    peers = std::move(items);
+}
+
+std::vector<service::lxmf::PeerInfo> ChatState::getPeers() const {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    return peers;
+}
+
+void ChatState::setMessages(std::vector<service::lxmf::MessageInfo> items) {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    messages = std::move(items);
+}
+
+std::vector<service::lxmf::MessageInfo> ChatState::getMessages() const {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    return messages;
+}
+
+bool ChatState::getActivePeer(service::reticulum::DestinationHash& outDestination) const {
+    auto lock = mutex.asScopedLock();
+    lock.lock();
+    if (!hasActivePeer) {
+        return false;
     }
-    messages.push_back(msg);
+    outDestination = activePeer;
+    return true;
 }
 
-std::vector<StoredMessage> ChatState::getFilteredMessages() const {
+std::string ChatState::getActiveTitle() const {
     auto lock = mutex.asScopedLock();
     lock.lock();
-    std::vector<StoredMessage> result;
-    result.reserve(messages.size()); // Avoid reallocations; may over-allocate slightly
-    for (const auto& msg : messages) {
-        // Show if broadcast (empty target) or matches current channel
-        if (msg.target.empty() || msg.target == currentChannel) {
-            result.push_back(msg);
-        }
-    }
-    return result;
+    return activeTitle;
 }
 
 } // namespace tt::app::chat

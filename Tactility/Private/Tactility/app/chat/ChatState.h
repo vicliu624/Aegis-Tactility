@@ -7,31 +7,31 @@
 #if defined(CONFIG_SOC_WIFI_SUPPORTED) && !defined(CONFIG_SLAVE_SOC_WIFI_SUPPORTED)
 
 #include <Tactility/RecursiveMutex.h>
+#include <Tactility/service/lxmf/Types.h>
 
-#include <cstddef>
-#include <deque>
 #include <string>
 #include <vector>
 
 namespace tt::app::chat {
 
-constexpr size_t MAX_MESSAGES = 100;
-
-struct StoredMessage {
-    std::string displayText;
-    std::string target; // for channel filtering
-    bool isOwn;
+enum class ScreenMode {
+    Conversations,
+    Contacts,
+    Thread
 };
 
-/** Thread safety: All public methods are mutex-protected.
- *  LVGL sync lock must be held separately when updating UI. */
 class ChatState {
 
     mutable RecursiveMutex mutex;
 
-    std::deque<StoredMessage> messages;
-    std::string currentChannel = "#general";
+    ScreenMode screenMode = ScreenMode::Conversations;
+    std::vector<service::lxmf::ConversationInfo> conversations {};
+    std::vector<service::lxmf::PeerInfo> peers {};
+    std::vector<service::lxmf::MessageInfo> messages {};
     std::string localNickname {};
+    service::reticulum::DestinationHash activePeer {};
+    std::string activeTitle {};
+    bool hasActivePeer = false;
 
 public:
     ChatState() = default;
@@ -45,13 +45,26 @@ public:
     void setLocalNickname(const std::string& nickname);
     std::string getLocalNickname() const;
 
-    void setCurrentChannel(const std::string& channel);
-    std::string getCurrentChannel() const;
+    void showConversations();
+    void showContacts();
+    void showThread(
+        const service::reticulum::DestinationHash& peerDestination,
+        const std::string& title
+    );
 
-    void addMessage(const StoredMessage& msg);
+    ScreenMode getScreenMode() const;
 
-    /** Returns messages matching the current channel (or broadcast). */
-    std::vector<StoredMessage> getFilteredMessages() const;
+    void setConversations(std::vector<service::lxmf::ConversationInfo> items);
+    std::vector<service::lxmf::ConversationInfo> getConversations() const;
+
+    void setPeers(std::vector<service::lxmf::PeerInfo> items);
+    std::vector<service::lxmf::PeerInfo> getPeers() const;
+
+    void setMessages(std::vector<service::lxmf::MessageInfo> items);
+    std::vector<service::lxmf::MessageInfo> getMessages() const;
+
+    bool getActivePeer(service::reticulum::DestinationHash& outDestination) const;
+    std::string getActiveTitle() const;
 };
 
 } // namespace tt::app::chat

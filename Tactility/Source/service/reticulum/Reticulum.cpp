@@ -65,20 +65,6 @@ std::vector<RegisteredDestination> getLocalDestinations() {
     return service != nullptr ? service->getLocalDestinations() : std::vector<RegisteredDestination> {};
 }
 
-bool registerAppEndpoint(const std::string& endpointName) {
-    auto service = findService();
-    if (service == nullptr) {
-        LOGGER.warn("Service not running");
-        return false;
-    }
-    return service->registerAppEndpoint(endpointName);
-}
-
-std::vector<AppEndpoint> getAppEndpoints() {
-    auto service = findService();
-    return service != nullptr ? service->getAppEndpoints() : std::vector<AppEndpoint> {};
-}
-
 std::vector<AnnounceInfo> getAnnounces() {
     auto service = findService();
     return service != nullptr ? service->getAnnounces() : std::vector<AnnounceInfo> {};
@@ -97,15 +83,6 @@ std::vector<LinkInfo> getLinks() {
 std::vector<ResourceInfo> getResources() {
     auto service = findService();
     return service != nullptr ? service->getResources() : std::vector<ResourceInfo> {};
-}
-
-bool broadcastAppData(const std::string& endpointName, const std::vector<uint8_t>& payload) {
-    auto service = findService();
-    if (service == nullptr) {
-        LOGGER.warn("Service not running");
-        return false;
-    }
-    return service->broadcastAppData(endpointName, payload);
 }
 
 bool sendFrame(const std::string& interfaceId, const InterfaceFrame& frame) {

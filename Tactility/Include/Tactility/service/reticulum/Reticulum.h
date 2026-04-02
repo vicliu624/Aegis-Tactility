@@ -31,10 +31,6 @@ bool registerLocalDestination(const LocalDestination& destination);
 
 std::vector<RegisteredDestination> getLocalDestinations();
 
-bool registerAppEndpoint(const std::string& endpointName);
-
-std::vector<AppEndpoint> getAppEndpoints();
-
 std::vector<AnnounceInfo> getAnnounces();
 
 std::vector<PathEntry> getPaths();
@@ -42,8 +38,6 @@ std::vector<PathEntry> getPaths();
 std::vector<LinkInfo> getLinks();
 
 std::vector<ResourceInfo> getResources();
-
-bool broadcastAppData(const std::string& endpointName, const std::vector<uint8_t>& payload);
 
 bool sendFrame(const std::string& interfaceId, const InterfaceFrame& frame);
 

@@ -129,12 +129,6 @@ struct RegisteredDestination {
     bool provisionalHash = true;
 };
 
-struct AppEndpoint {
-    std::string name {};
-    DestinationHash hash {};
-    bool provisionalHash = true;
-};
-
 struct PathEntry {
     DestinationHash destination {};
     std::string interfaceId {};
@@ -172,17 +166,6 @@ struct AnnounceInfo {
     bool pathResponse = false;
     bool provisional = true;
     uint32_t observedTick = 0;
-};
-
-struct AppDataInfo {
-    std::string endpoint {};
-    DestinationHash destination {};
-    std::string interfaceId {};
-    InterfaceKind interfaceKind = InterfaceKind::Unknown;
-    std::vector<uint8_t> nextHop {};
-    std::vector<uint8_t> payload {};
-    uint8_t hops = 0;
-    bool provisional = true;
 };
 
 struct PacketSummary {
