@@ -2,8 +2,10 @@
 
 #include <Tactility/Logger.h>
 #include <Tactility/file/File.h>
+#include <Tactility/kernel/Kernel.h>
 #include <Tactility/service/ServiceManifest.h>
 #include <Tactility/service/ServiceRegistration.h>
+#include <Tactility/service/reticulum/Crypto.h>
 #include <Tactility/service/reticulum/DestinationRegistry.h>
 #include <Tactility/service/reticulum/IdentityStore.h>
 #include <Tactility/service/reticulum/InterfaceManager.h>
@@ -15,17 +17,23 @@
 #include <Tactility/service/reticulum/interfaces/EspNowInterface.h>
 #include <Tactility/service/reticulum/interfaces/LoRaInterface.h>
 #include <Tactility/settings/ReticulumSettings.h>
-#include <Tactility/kernel/Kernel.h>
 
 #include <algorithm>
 #include <format>
 
 namespace tt::service::reticulum {
 
-static const auto LOGGER = Logger("Reticulum");
 extern const ServiceManifest manifest;
 
-static InterfaceDescriptor toDescriptor(const InboundFrame& frame) {
+namespace {
+
+static const auto LOGGER = Logger("Reticulum");
+constexpr uint32_t PATH_EXPIRY_SECONDS = 60U * 60U * 24U * 7U;
+constexpr size_t MAX_DISCOVERY_TAGS = 512;
+constexpr uint8_t KEEPALIVE_REQUEST = 0xFF;
+constexpr uint8_t KEEPALIVE_REPLY = 0xFE;
+
+InterfaceDescriptor toDescriptor(const InboundFrame& frame) {
     return InterfaceDescriptor {
         .id = frame.interfaceId,
         .kind = frame.interfaceKind,
@@ -34,6 +42,47 @@ static InterfaceDescriptor toDescriptor(const InboundFrame& frame) {
         .metrics = frame.metrics
     };
 }
+
+bool shouldInstallPath(const std::optional<PathEntry>& existing, const PathEntry& candidate) {
+    if (!existing.has_value()) {
+        return true;
+    }
+
+    const auto now = kernel::getTicks();
+    if (existing->expiryTick <= now) {
+        return true;
+    }
+
+    if (candidate.hops < existing->hops) {
+        return true;
+    }
+
+    if (candidate.announceRandom != existing->announceRandom) {
+        return true;
+    }
+
+    return existing->unresponsive;
+}
+
+std::vector<uint8_t> buildDiscoveryTag(const std::vector<uint8_t>& preferredTag) {
+    if (!preferredTag.empty()) {
+        const auto size = std::min(preferredTag.size(), PATH_REQUEST_TAG_MAX_LENGTH);
+        return std::vector<uint8_t>(preferredTag.begin(), preferredTag.begin() + size);
+    }
+
+    std::vector<uint8_t> tag(PATH_REQUEST_TAG_MAX_LENGTH, 0);
+    if (crypto::fillRandom(tag.data(), tag.size())) {
+        return tag;
+    }
+
+    const auto ticks = kernel::getTicks();
+    for (size_t index = 0; index < tag.size(); index++) {
+        tag[index] = static_cast<uint8_t>((ticks >> ((index % sizeof(ticks)) * 8)) & 0xFF);
+    }
+    return tag;
+}
+
+} // namespace
 
 ReticulumService::ReticulumService() :
     identityStore(std::make_unique<IdentityStore>()),
@@ -68,22 +117,12 @@ void ReticulumService::observeAnnounce(AnnounceInfo announce) {
         auto lock = mutex.asScopedLock();
         lock.lock();
 
-        auto iterator = std::find_if(observedAnnounces.begin(), observedAnnounces.end(), [&announce](const auto& existing) {
+        const auto iterator = std::find_if(observedAnnounces.begin(), observedAnnounces.end(), [&announce](const auto& existing) {
             return existing.destination == announce.destination;
         });
 
         if (iterator != observedAnnounces.end()) {
-            iterator->interfaceId = announce.interfaceId;
-            iterator->interfaceKind = announce.interfaceKind;
-            iterator->nextHop = std::move(announce.nextHop);
-            iterator->appData = std::move(announce.appData);
-            iterator->hops = announce.hops;
-            iterator->context = announce.context;
-            iterator->local = iterator->local || announce.local;
-            iterator->pathResponse = announce.pathResponse;
-            iterator->provisional = iterator->provisional && announce.provisional;
-            iterator->observedTick = announce.observedTick;
-            announce = *iterator;
+            *iterator = announce;
         } else {
             observedAnnounces.push_back(announce);
         }
@@ -96,7 +135,12 @@ void ReticulumService::observeAnnounce(AnnounceInfo announce) {
         .destination = announce.destination,
         .detail = announce.local
             ? std::format("Local announce ready for {}", toHex(announce.destination))
-            : std::format("Observed announce for {} via {}", toHex(announce.destination), announce.interfaceId.empty() ? "unknown interface" : announce.interfaceId)
+            : std::format(
+                "Observed {} announce for {} via {}",
+                announce.pathResponse ? "path-response" : "network",
+                toHex(announce.destination),
+                announce.interfaceId.empty() ? "unknown interface" : announce.interfaceId
+            )
     });
 }
 
@@ -107,6 +151,16 @@ void ReticulumService::publishPathTableChanged(const PathEntry& entry, std::stri
         .path = entry,
         .destination = entry.destination,
         .detail = detail.empty() ? std::format("Path updated for {}", toHex(entry.destination)) : std::move(detail)
+    });
+}
+
+void ReticulumService::publishLinkTableChanged(const LinkInfo& entry, std::string detail) {
+    publishEvent(ReticulumEvent {
+        .type = EventType::LinkTableChanged,
+        .runtimeState = getRuntimeState(),
+        .link = entry,
+        .destination = entry.linkId,
+        .detail = detail.empty() ? std::format("Link state changed for {}", toHex(entry.linkId)) : std::move(detail)
     });
 }
 
@@ -125,8 +179,53 @@ bool ReticulumService::broadcastPacket(const std::vector<uint8_t>& packet) {
     return delivered;
 }
 
+bool ReticulumService::sendPacketOnInterface(const std::string& interfaceId, const std::vector<uint8_t>& packet) {
+    if (interfaceId.empty()) {
+        return false;
+    }
+
+    return interfaceManager->sendFrame(interfaceId, InterfaceFrame {
+        .payload = packet,
+        .broadcast = false
+    });
+}
+
+bool ReticulumService::announceDestination(const RegisteredDestination& destination, bool pathResponse, const std::string& interfaceId) {
+    const auto localIdentity = identityStore->getLocalIdentity();
+    const auto packet = packetCodec->encodeAnnounce(destination, localIdentity.signingPrivateKey, pathResponse);
+    if (packet.empty()) {
+        return false;
+    }
+
+    const bool delivered = interfaceId.empty()
+        ? broadcastPacket(packet)
+        : sendPacketOnInterface(interfaceId, packet);
+    if (!delivered) {
+        return false;
+    }
+
+    const auto summary = packetCodec->summarize(packet);
+    observeAnnounce(AnnounceInfo {
+        .destination = destination.hash,
+        .identityHash = destination.identityHash,
+        .nameHash = destination.nameHash,
+        .identityPublicKey = destination.identityPublicKey,
+        .packetHash = summary.has_value() ? summary->packetHash : FullHashBytes {},
+        .interfaceId = interfaceId,
+        .interfaceKind = InterfaceKind::Unknown,
+        .appData = destination.appData,
+        .hops = 0,
+        .context = static_cast<uint8_t>(pathResponse ? PacketContext::PathResponse : PacketContext::None),
+        .local = true,
+        .pathResponse = pathResponse,
+        .validated = true,
+        .observedTick = kernel::getTicks()
+    });
+    return true;
+}
+
 bool ReticulumService::onStart(ServiceContext& serviceContext) {
-    LOGGER.info("Starting Reticulum service milestone shell");
+    LOGGER.info("Starting Reticulum service");
 
     paths = serviceContext.getPaths();
     if (paths == nullptr) {
@@ -191,6 +290,7 @@ void ReticulumService::onStop(ServiceContext& serviceContext) {
         auto lock = mutex.asScopedLock();
         lock.lock();
         observedAnnounces.clear();
+        seenPathRequestKeys.clear();
     }
 
     setRuntimeState(RuntimeState::Stopped);
@@ -205,8 +305,7 @@ bool ReticulumService::registerInterface(const std::shared_ptr<Interface>& inter
         return false;
     }
 
-    const auto descriptors = interfaceManager->getInterfaces();
-    for (const auto& descriptor : descriptors) {
+    for (const auto& descriptor : interfaceManager->getInterfaces()) {
         if (descriptor.id == interfaceInstance->getId()) {
             publishEvent(ReticulumEvent {
                 .type = EventType::InterfaceAttached,
@@ -249,7 +348,7 @@ bool ReticulumService::registerLocalDestination(const LocalDestination& destinat
         return false;
     }
 
-    const auto result = destinationRegistry->registerLocalDestination(destination, identityStore->getBootstrapIdentity());
+    const auto result = destinationRegistry->registerLocalDestination(destination, identityStore->getLocalIdentity());
     if (!result) {
         return false;
     }
@@ -258,25 +357,19 @@ bool ReticulumService::registerLocalDestination(const LocalDestination& destinat
     const auto iterator = std::find_if(registered.begin(), registered.end(), [&destination](const auto& item) {
         return item.name == destination.name;
     });
-    if (iterator != registered.end()) {
-        publishEvent(ReticulumEvent {
-            .type = EventType::LocalDestinationRegistered,
-            .runtimeState = getRuntimeState(),
-            .destination = iterator->hash,
-            .detail = std::format("Registered local destination {} ({})", iterator->name, toHex(iterator->hash))
-        });
+    if (iterator == registered.end()) {
+        return false;
+    }
 
-        if (iterator->announceEnabled) {
-            observeAnnounce(AnnounceInfo {
-                .destination = iterator->hash,
-                .appData = iterator->appData,
-                .hops = 0,
-                .local = true,
-                .pathResponse = false,
-                .provisional = iterator->provisionalHash,
-                .observedTick = kernel::getTicks()
-            });
-        }
+    publishEvent(ReticulumEvent {
+        .type = EventType::LocalDestinationRegistered,
+        .runtimeState = getRuntimeState(),
+        .destination = iterator->hash,
+        .detail = std::format("Registered local destination {} ({})", iterator->name, toHex(iterator->hash))
+    });
+
+    if (iterator->announceEnabled) {
+        announceDestination(*iterator, false);
     }
 
     return true;
@@ -284,6 +377,136 @@ bool ReticulumService::registerLocalDestination(const LocalDestination& destinat
 
 std::vector<RegisteredDestination> ReticulumService::getLocalDestinations() {
     return destinationRegistry->getLocalDestinations();
+}
+
+bool ReticulumService::announceLocalDestination(const DestinationHash& destinationHash) {
+    if (const auto destination = destinationRegistry->findLocalDestination(destinationHash);
+        destination.has_value() && destination->announceEnabled) {
+        return announceDestination(*destination, false);
+    }
+
+    return false;
+}
+
+bool ReticulumService::requestPath(const DestinationHash& destinationHash, const std::vector<uint8_t>& tag) {
+    if (destinationHash.empty()) {
+        return false;
+    }
+
+    const auto packet = packetCodec->encodePathRequest(destinationHash, buildDiscoveryTag(tag));
+    if (packet.empty()) {
+        return false;
+    }
+
+    return broadcastPacket(packet);
+}
+
+bool ReticulumService::openLink(const DestinationHash& destinationHash, DestinationHash& outLinkId) {
+    if (destinationHash.empty()) {
+        return false;
+    }
+
+    const auto knownDestination = identityStore->getKnownDestination(destinationHash);
+    const auto path = transportCore->getPath(destinationHash);
+    if (!knownDestination.has_value() || !path.has_value() || path->interfaceId.empty() || path->unresponsive) {
+        requestPath(destinationHash);
+        return false;
+    }
+
+    std::vector<uint8_t> packet;
+    if (!linkManager->beginInitiatorLink(
+            destinationHash,
+            knownDestination->identityHash,
+            knownDestination->identityPublicKey,
+            path->interfaceId,
+            *packetCodec,
+            outLinkId,
+            packet)) {
+        return false;
+    }
+
+    if (!sendPacketOnInterface(path->interfaceId, packet)) {
+        linkManager->removeLink(outLinkId);
+        return false;
+    }
+
+    if (const auto link = linkManager->getLink(outLinkId); link.has_value()) {
+        publishLinkTableChanged(*link, std::format("Opened link request {}", toHex(outLinkId)));
+    }
+
+    return true;
+}
+
+bool ReticulumService::sendLinkData(const DestinationHash& linkId, uint8_t context, const std::vector<uint8_t>& plaintext) {
+    const auto link = linkManager->getLink(linkId);
+    if (!link.has_value() || link->interfaceId.empty() || link->state == LinkState::Closed) {
+        return false;
+    }
+
+    std::vector<uint8_t> packet;
+    if (!linkManager->encodeLinkData(linkId, context, plaintext, *packetCodec, packet)) {
+        return false;
+    }
+
+    if (!sendPacketOnInterface(link->interfaceId, packet)) {
+        return false;
+    }
+
+    if (const auto updatedLink = linkManager->getLink(linkId); updatedLink.has_value()) {
+        publishLinkTableChanged(*updatedLink, std::format(
+            "Sent link packet {} on {}",
+            packetContextToString(context),
+            toHex(linkId)
+        ));
+    }
+
+    return true;
+}
+
+bool ReticulumService::identifyLink(const DestinationHash& linkId) {
+    const auto localIdentity = identityStore->getLocalIdentity();
+
+    std::vector<uint8_t> transcript;
+    transcript.reserve(linkId.bytes.size() + localIdentity.publicKey.size());
+    transcript.insert(transcript.end(), linkId.bytes.begin(), linkId.bytes.end());
+    transcript.insert(transcript.end(), localIdentity.publicKey.begin(), localIdentity.publicKey.end());
+
+    SignatureBytes signature {};
+    if (!crypto::ed25519Sign(localIdentity.signingPrivateKey, transcript.data(), transcript.size(), signature)) {
+        return false;
+    }
+
+    std::vector<uint8_t> plaintext;
+    plaintext.reserve(localIdentity.publicKey.size() + signature.size());
+    plaintext.insert(plaintext.end(), localIdentity.publicKey.begin(), localIdentity.publicKey.end());
+    plaintext.insert(plaintext.end(), signature.begin(), signature.end());
+
+    return sendLinkData(linkId, static_cast<uint8_t>(PacketContext::LinkIdentify), plaintext);
+}
+
+bool ReticulumService::closeLink(const DestinationHash& linkId) {
+    const auto link = linkManager->getLink(linkId);
+    if (!link.has_value()) {
+        return false;
+    }
+
+    std::vector<uint8_t> plaintext(linkId.bytes.begin(), linkId.bytes.end());
+    if (link->state != LinkState::Closed) {
+        std::vector<uint8_t> packet;
+        if (linkManager->encodeLinkData(linkId, static_cast<uint8_t>(PacketContext::LinkClose), plaintext, *packetCodec, packet)
+            && !link->interfaceId.empty()) {
+            sendPacketOnInterface(link->interfaceId, packet);
+        }
+    }
+
+    const auto closed = linkManager->closeLink(linkId);
+    if (closed) {
+        if (const auto updatedLink = linkManager->getLink(linkId); updatedLink.has_value()) {
+            publishLinkTableChanged(*updatedLink, std::format("Closed link {}", toHex(linkId)));
+        }
+    }
+
+    return closed;
 }
 
 std::vector<AnnounceInfo> ReticulumService::getAnnounces() {
@@ -327,13 +550,13 @@ void ReticulumService::onInboundFrame(InboundFrame frame) {
             .detail = std::format("Queued {} inbound bytes", frame.payload.size())
         });
 
-        const auto packet = packetCodec->summarize(frame.payload);
-        if (!packet.has_value()) {
+        const auto decoded = packetCodec->decode(frame.payload);
+        if (!decoded.has_value()) {
             publishEvent(ReticulumEvent {
                 .type = EventType::Error,
                 .runtimeState = getRuntimeState(),
                 .interface = toDescriptor(frame),
-                .detail = "Failed to summarize inbound packet"
+                .detail = "Failed to decode inbound Reticulum packet"
             });
             return;
         }
@@ -342,31 +565,127 @@ void ReticulumService::onInboundFrame(InboundFrame frame) {
             .type = EventType::PacketDecoded,
             .runtimeState = getRuntimeState(),
             .interface = toDescriptor(frame),
-            .packet = packet,
-            .detail = "Captured packet envelope summary"
+            .packet = decoded->summary,
+            .detail = std::format(
+                "Decoded {} {} packet with {} context",
+                destinationTypeToString(decoded->summary.destinationType),
+                packetTypeToString(decoded->summary.packetType),
+                packetContextToString(decoded->summary.context.value_or(static_cast<uint8_t>(PacketContext::None)))
+            )
         });
 
-        const auto announce = packetCodec->extractAnnounce(frame);
-        if (announce.has_value()) {
+        const auto pinnedDestination = identityStore->getKnownDestination(decoded->header.destination);
+        const auto* pinnedIdentity = pinnedDestination.has_value() ? &pinnedDestination->identityPublicKey : nullptr;
+        if (const auto announce = packetCodec->decodeAnnounce(frame, *decoded, pinnedIdentity); announce.has_value()) {
             observeAnnounce(*announce);
 
-            if (!announce->local && !announce->nextHop.empty()) {
-                const PathEntry entry {
-                    .destination = announce->destination,
-                    .interfaceId = announce->interfaceId,
-                    .nextHop = announce->nextHop,
-                    .hops = announce->hops,
-                    .expiryTick = kernel::getTicks() + kernel::secondsToTicks(60 * 60),
-                    .unresponsive = false
-                };
+            identityStore->rememberDestination(IdentityStore::KnownDestination {
+                .destinationHash = announce->destination,
+                .identityHash = announce->identityHash,
+                .nameHash = announce->nameHash,
+                .identityPublicKey = announce->identityPublicKey,
+                .appData = announce->appData,
+                .latestRatchetPublicKey = announce->ratchetPublicKey,
+                .lastAnnouncePacketHash = announce->packetHash,
+                .lastAnnounceRandom = announce->announceRandom,
+                .lastSeenTick = announce->observedTick
+            });
 
-                const auto existing = transportCore->getPath(entry.destination);
+            if (announce->ratchetPublicKey.has_value()) {
+                identityStore->updateRatchet(announce->destination, *announce->ratchetPublicKey);
+            }
+
+            const PathEntry entry {
+                .destination = announce->destination,
+                .identityHash = announce->identityHash,
+                .interfaceId = announce->interfaceId,
+                .nextHop = announce->nextHop,
+                .hops = announce->hops,
+                .expiryTick = kernel::getTicks() + kernel::secondsToTicks(PATH_EXPIRY_SECONDS),
+                .observedTick = announce->observedTick,
+                .announceRandom = announce->announceRandom,
+                .packetHash = announce->packetHash,
+                .unresponsive = false
+            };
+
+            const auto existing = transportCore->getPath(entry.destination);
+            if (shouldInstallPath(existing, entry)) {
                 transportCore->installPath(entry);
                 publishPathTableChanged(entry, existing.has_value()
                     ? std::format("Refreshed path for {} via {}", toHex(entry.destination), entry.interfaceId)
                     : std::format("Installed path for {} via {}", toHex(entry.destination), entry.interfaceId)
                 );
             }
+            return;
+        }
+
+        if (const auto pathRequest = packetCodec->decodePathRequest(frame, *decoded); pathRequest.has_value()) {
+            bool seenBefore = false;
+            {
+                auto lock = mutex.asScopedLock();
+                lock.lock();
+                seenBefore = std::ranges::find(seenPathRequestKeys, pathRequest->duplicateKey) != seenPathRequestKeys.end();
+                if (!seenBefore) {
+                    seenPathRequestKeys.push_back(pathRequest->duplicateKey);
+                    if (seenPathRequestKeys.size() > MAX_DISCOVERY_TAGS) {
+                        seenPathRequestKeys.erase(seenPathRequestKeys.begin());
+                    }
+                }
+            }
+
+            if (seenBefore) {
+                return;
+            }
+
+            if (const auto localDestination = destinationRegistry->findLocalDestination(pathRequest->requestedDestination);
+                localDestination.has_value() && localDestination->announceEnabled) {
+                announceDestination(*localDestination, true, frame.interfaceId);
+            }
+            return;
+        }
+
+        DestinationHash linkId {};
+        if (const auto linkRequest = packetCodec->decodeLinkRequest(frame, *decoded, linkId); linkRequest.has_value()) {
+            if (const auto localDestination = destinationRegistry->findLocalDestination(linkRequest->destination);
+                localDestination.has_value() && localDestination->acceptsLinks && localDestination->type == DestinationType::Single) {
+                if (const auto response = linkManager->acceptLinkRequest(*linkRequest, *localDestination, identityStore->getLocalIdentity(), *packetCodec);
+                    response.has_value()) {
+                    sendPacketOnInterface(linkRequest->interfaceId, *response);
+                    if (const auto link = linkManager->getLink(linkRequest->linkId); link.has_value()) {
+                        publishLinkTableChanged(*link, std::format("Accepted link request {}", toHex(linkRequest->linkId)));
+                    }
+                }
+            }
+            return;
+        }
+
+        if (const auto linkProof = packetCodec->decodeLinkProof(frame, *decoded); linkProof.has_value()) {
+            if (const auto response = linkManager->acceptLinkProof(*linkProof, *packetCodec); response.has_value()) {
+                sendPacketOnInterface(linkProof->interfaceId, *response);
+                if (const auto link = linkManager->getLink(linkProof->linkId); link.has_value()) {
+                    publishLinkTableChanged(*link, std::format("Activated link {}", toHex(linkProof->linkId)));
+                }
+            }
+            return;
+        }
+
+        if (const auto linkData = linkManager->decodeLinkData(*decoded); linkData.has_value()) {
+            if (linkData->context == static_cast<uint8_t>(PacketContext::Keepalive) &&
+                linkData->plaintext.size() == 1 &&
+                linkData->plaintext[0] == KEEPALIVE_REQUEST) {
+                std::vector<uint8_t> replyPacket;
+                if (linkManager->encodeLinkData(linkData->linkId, static_cast<uint8_t>(PacketContext::Keepalive), { KEEPALIVE_REPLY }, *packetCodec, replyPacket)) {
+                    sendPacketOnInterface(linkData->link.interfaceId, replyPacket);
+                }
+            } else if (linkData->context == static_cast<uint8_t>(PacketContext::LinkClose)) {
+                linkManager->closeLink(linkData->linkId);
+            }
+
+            publishLinkTableChanged(linkData->link, std::format(
+                "Processed link packet {} on {}",
+                packetContextToString(linkData->context),
+                toHex(linkData->linkId)
+            ));
         }
     });
 }

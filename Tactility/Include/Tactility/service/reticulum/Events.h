@@ -30,6 +30,8 @@ struct ReticulumEvent {
     std::optional<PacketSummary> packet {};
     std::optional<AnnounceInfo> announce {};
     std::optional<PathEntry> path {};
+    std::optional<LinkInfo> link {};
+    std::optional<ResourceInfo> resource {};
     std::optional<DestinationHash> destination {};
     std::string detail {};
 };

@@ -65,6 +65,60 @@ std::vector<RegisteredDestination> getLocalDestinations() {
     return service != nullptr ? service->getLocalDestinations() : std::vector<RegisteredDestination> {};
 }
 
+bool announceLocalDestination(const DestinationHash& destinationHash) {
+    auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Service not running");
+        return false;
+    }
+    return service->announceLocalDestination(destinationHash);
+}
+
+bool requestPath(const DestinationHash& destinationHash, const std::vector<uint8_t>& tag) {
+    auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Service not running");
+        return false;
+    }
+    return service->requestPath(destinationHash, tag);
+}
+
+bool openLink(const DestinationHash& destinationHash, DestinationHash& outLinkId) {
+    auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Service not running");
+        return false;
+    }
+    return service->openLink(destinationHash, outLinkId);
+}
+
+bool sendLinkData(const DestinationHash& linkId, uint8_t context, const std::vector<uint8_t>& plaintext) {
+    auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Service not running");
+        return false;
+    }
+    return service->sendLinkData(linkId, context, plaintext);
+}
+
+bool identifyLink(const DestinationHash& linkId) {
+    auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Service not running");
+        return false;
+    }
+    return service->identifyLink(linkId);
+}
+
+bool closeLink(const DestinationHash& linkId) {
+    auto service = findService();
+    if (service == nullptr) {
+        LOGGER.warn("Service not running");
+        return false;
+    }
+    return service->closeLink(linkId);
+}
+
 std::vector<AnnounceInfo> getAnnounces() {
     auto service = findService();
     return service != nullptr ? service->getAnnounces() : std::vector<AnnounceInfo> {};

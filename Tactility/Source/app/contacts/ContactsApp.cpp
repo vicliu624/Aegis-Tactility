@@ -225,9 +225,7 @@ class ContactsApp final : public App {
             entry.subtitle = formatText(i18n::Text::LOCAL_SUBTITLE_FMT,
                 destination.acceptsLinks ? getTextResources()[i18n::Text::ACCEPTS_LINKS] : getTextResources()[i18n::Text::NO_LINKS],
                 shortenHash(destination.hash));
-            entry.detail = destination.provisionalHash
-                ? getTextResources()[i18n::Text::PROVISIONAL_LOCAL_DESTINATION]
-                : getTextResources()[i18n::Text::LOCAL_DESTINATION];
+            entry.detail = getTextResources()[i18n::Text::LOCAL_DESTINATION];
         }
 
         for (const auto& announce : service::reticulum::getAnnounces()) {

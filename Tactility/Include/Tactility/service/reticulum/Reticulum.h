@@ -31,6 +31,18 @@ bool registerLocalDestination(const LocalDestination& destination);
 
 std::vector<RegisteredDestination> getLocalDestinations();
 
+bool announceLocalDestination(const DestinationHash& destinationHash);
+
+bool requestPath(const DestinationHash& destinationHash, const std::vector<uint8_t>& tag = {});
+
+bool openLink(const DestinationHash& destinationHash, DestinationHash& outLinkId);
+
+bool sendLinkData(const DestinationHash& linkId, uint8_t context, const std::vector<uint8_t>& plaintext);
+
+bool identifyLink(const DestinationHash& linkId);
+
+bool closeLink(const DestinationHash& linkId);
+
 std::vector<AnnounceInfo> getAnnounces();
 
 std::vector<PathEntry> getPaths();

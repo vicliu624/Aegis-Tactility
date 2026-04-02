@@ -30,6 +30,7 @@ class ReticulumService final : public Service {
     std::shared_ptr<PubSub<ReticulumEvent>> pubsub = std::make_shared<PubSub<ReticulumEvent>>();
     std::unique_ptr<DispatcherThread> dispatcher = std::make_unique<DispatcherThread>("reticulum_dispatcher", 6144);
     std::vector<AnnounceInfo> observedAnnounces {};
+    std::vector<FullHashBytes> seenPathRequestKeys {};
 
     std::unique_ptr<IdentityStore> identityStore;
     std::unique_ptr<DestinationRegistry> destinationRegistry;
@@ -47,7 +48,13 @@ class ReticulumService final : public Service {
 
     void publishPathTableChanged(const PathEntry& entry, std::string detail);
 
+    void publishLinkTableChanged(const LinkInfo& entry, std::string detail);
+
     bool broadcastPacket(const std::vector<uint8_t>& packet);
+
+    bool sendPacketOnInterface(const std::string& interfaceId, const std::vector<uint8_t>& packet);
+
+    bool announceDestination(const RegisteredDestination& destination, bool pathResponse = false, const std::string& interfaceId = {});
 
     void onInboundFrame(InboundFrame frame);
 
@@ -69,6 +76,18 @@ public:
     bool registerLocalDestination(const LocalDestination& destination);
 
     std::vector<RegisteredDestination> getLocalDestinations();
+
+    bool announceLocalDestination(const DestinationHash& destinationHash);
+
+    bool requestPath(const DestinationHash& destinationHash, const std::vector<uint8_t>& tag = {});
+
+    bool openLink(const DestinationHash& destinationHash, DestinationHash& outLinkId);
+
+    bool sendLinkData(const DestinationHash& linkId, uint8_t context, const std::vector<uint8_t>& plaintext);
+
+    bool identifyLink(const DestinationHash& linkId);
+
+    bool closeLink(const DestinationHash& linkId);
 
     std::vector<AnnounceInfo> getAnnounces();
 
