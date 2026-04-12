@@ -77,7 +77,8 @@ bool startService(const std::string& id) {
     instance_mutex.unlock();
 
     service_instance->setState(State::Starting);
-    if (service_instance->getService()->onStart(*service_instance)) {
+    const bool started = service_instance->getService()->onStart(*service_instance);
+    if (started) {
         service_instance->setState(State::Started);
     } else {
         LOGGER.error("Starting {} failed", id);
@@ -87,9 +88,11 @@ bool startService(const std::string& id) {
         instance_mutex.unlock();
     }
 
-    LOGGER.info("Started {}", id);
+    if (started) {
+        LOGGER.info("Started {}", id);
+    }
 
-    return true;
+    return started;
 }
 
 std::shared_ptr<ServiceContext> findServiceContextById(const std::string& id) {

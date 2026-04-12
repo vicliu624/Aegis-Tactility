@@ -5,6 +5,7 @@
 
 #include <charconv>
 #include <map>
+#include <string_view>
 
 namespace tt::settings::reticulum {
 
@@ -36,7 +37,13 @@ static bool parseUint8(const std::string& value, uint8_t& out) {
 }
 
 LoRaSettings getDefault() {
-    return LoRaSettings {};
+    LoRaSettings settings {};
+#ifdef CONFIG_TT_DEVICE_ID
+    if (std::string_view(CONFIG_TT_DEVICE_ID) == "lilygo-tdeck") {
+        settings.enabled = true;
+    }
+#endif
+    return settings;
 }
 
 bool load(LoRaSettings& settings) {

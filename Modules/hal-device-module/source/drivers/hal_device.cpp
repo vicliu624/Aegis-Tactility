@@ -34,6 +34,8 @@ static enum HalDeviceType getHalDeviceType(tt::hal::Device::Type type) {
             return HalDeviceType::HAL_DEVICE_TYPE_POWER;
         case tt::hal::Device::Type::Gps:
             return HalDeviceType::HAL_DEVICE_TYPE_GPS;
+        case tt::hal::Device::Type::Radio:
+            return HalDeviceType::HAL_DEVICE_TYPE_RADIO;
         case tt::hal::Device::Type::Other:
             return HalDeviceType::HAL_DEVICE_TYPE_OTHER;
         default:

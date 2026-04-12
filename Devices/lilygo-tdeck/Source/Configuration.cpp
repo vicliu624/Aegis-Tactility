@@ -2,6 +2,7 @@
 #include "devices/KeyboardBacklight.h"
 #include "devices/Power.h"
 #include "devices/Sdcard.h"
+#include "devices/TdeckSx1262LoRaDevice.h"
 #include "devices/TdeckKeyboard.h"
 #include "devices/TrackballDevice.h"
 
@@ -15,6 +16,7 @@ using namespace tt::hal;
 static std::vector<std::shared_ptr<tt::hal::Device>> createDevices() {
     return {
         createPower(),
+        createLoRaDevice(),
         createDisplay(),
         std::make_shared<TdeckKeyboard>(),
         std::make_shared<KeyboardBacklightDevice>(),
